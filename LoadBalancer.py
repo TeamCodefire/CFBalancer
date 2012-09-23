@@ -18,36 +18,33 @@ del cpu_count;		# not strictly necessary, but it frees a bit of ram
 server_table = {};	# This is a local table storing the server loads
 
 def heartbeat_listener():
-	print("Listening for heartbeats...");
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((HEARTBEAT_HOST, HEARTBEAT_PORT));
 	while True:
-		print("Looping in heartbeat thread.");
 		packet = s.recvfrom(128);
-		print("Got a heartbeat: " + str(packet));
 		# A very conoluted way to get the data in place, using as little ram as possible.
 		server_table[packet[1][0]] = [0] + packet[0].split(',');
-		print("server_table: " + str(server_table));
 	return;
 
 def webservice_listener():
-	print("Listening for connections...");
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
 	s.bind((WEBSERVICE_HOST, WEBSERVICE_PORT));
 	s.listen(10);
 	while True:
-		print("Looping in webservice thread.");
 		sock = s.accept()[0]
 		t = Thread(target = webservice_handler, args = [sock]);
 		t.start();
 	return;
 
 def webservice_handler(s):
-	print("Got a connection, handling it...");
 	data = "";
 	for ip in server_table:
-		data += server_table[ip].join(',') + "\r\n";
-	print("Returned data: " + data);
+		tmp_str = "";
+		for i in server_table[ip]:
+			tmp_str += str(i);
+			if (i != server_table[ip][-1]):
+				tmp_str += ",";
+		data += tmp_str + "\r\n";
 	s.send(data);
 	return
 
@@ -60,7 +57,7 @@ def main():
 
 	while True:
 		print("Main: " + str(server_table));
-		sleep(HEARTBEAT_INTERVAL / 1000.0);	# sleep in ms
+		sleep(HEARTBEAT_INTERVAL / 1000.0);			# sleep in ms
 		heartbeat = str(HOSTNAME + "," + str(getloadavg()[0] / CPU_CORES) + "," + "0.14");
 		for ip in server_table:
 			if (server_table[ip]):
@@ -69,7 +66,6 @@ def main():
 					del server_table[ip];
 					continue;
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-			print("Sending heartbeat to: " + str(ip));
 			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 
 main();
