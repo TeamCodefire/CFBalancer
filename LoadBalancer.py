@@ -11,10 +11,7 @@ WEBSERVICE_HOST = "localhost";
 WEBSERVICE_PORT = 44444;
 CPU_CORES = cpu_count();
 HOSTNAME = socket.gethostname();
-HOSTS = ('127.0.0.1', '127.0.0.1');
-
-heartbeat_thread = None;
-webservice_thread = None;
+CODEFIRE_WEB_IPS = ['127.0.0.1'];
 
 del cpu_count;		# not strictly necessary, but it frees a bit of ram
 
@@ -47,7 +44,7 @@ def webservice_handler(s):
 	return
 
 def main():
-	for ip in HOSTS:
+	for ip in CODEFIRE_WEB_IPS:
 		server_table[ip] = None;
 
 	heartbeat_thread = Thread(target = heartbeat_listener);		# Start the heartbeat listener
@@ -61,14 +58,17 @@ def main():
 		print("Main: " + str(server_table));
 		sleep(HEARTBEAT_INTERVAL / 1000.0);			# sleep in ms
 		heartbeat = str(HOSTNAME + "," + str(getloadavg()[0] / CPU_CORES) + "," + "0.14");
+		ghost_hosts = [];
 		for ip in server_table:
 			# Send a heartbeat to them.
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
 				if (server_table[ip][0] > 60):
-					del server_table[ip];
+					ghost_hosts.appen(server_table[ip]);
 					continue;
 				server_table[ip][0] += 1;
+		for ip in ghost_hosts:
+			del server_table[ip];
 
 main();
