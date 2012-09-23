@@ -13,6 +13,9 @@ CPU_CORES = cpu_count();
 HOSTNAME = socket.gethostname();
 HOSTS = ('127.0.0.1', '127.0.0.1');
 
+heartbeat_thread = None;
+webservice_thread = None;
+
 del cpu_count;		# not strictly necessary, but it frees a bit of ram
 
 server_table = {};	# This is a local table storing the server loads
@@ -47,20 +50,25 @@ def main():
 	for ip in HOSTS:
 		server_table[ip] = None;
 
-	Thread(target = heartbeat_listener).start();	# Start the heartbeat listener
-	Thread(target = webservice_listener).start();	# Start the webservice listener
+	heartbeat_thread = Thread(target = heartbeat_listener);		# Start the heartbeat listener
+	heartbeat_thread.daemon = True;
+	heartbeat_thread.start();
+	webservice_thread = Thread(target = webservice_listener);	# Start the webservice listener
+	webservice_thread.daemon = True;
+	webservice_thread.start();
 
 	while True:
 		print("Main: " + str(server_table));
 		sleep(HEARTBEAT_INTERVAL / 1000.0);			# sleep in ms
 		heartbeat = str(HOSTNAME + "," + str(getloadavg()[0] / CPU_CORES) + "," + "0.14");
 		for ip in server_table:
+			# Send a heartbeat to them.
+			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
+			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
-				server_table[ip][0] += 1;
 				if (server_table[ip][0] > 60):
 					del server_table[ip];
 					continue;
-			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
+				server_table[ip][0] += 1;
 
 main();
