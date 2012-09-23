@@ -65,7 +65,7 @@ def main():
 			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
 				if (server_table[ip][0] > 60):
-					ghost_hosts.appen(server_table[ip]);
+					ghost_hosts.append(server_table[ip]);
 					continue;
 				server_table[ip][0] += 1;
 		for ip in ghost_hosts:
