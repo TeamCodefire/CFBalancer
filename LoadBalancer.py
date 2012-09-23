@@ -58,16 +58,17 @@ def main():
 	Thread(target = webservice_listener).start();	# Start the webservice listener
 
 	while True:
-		print("Looping.");
+		print("Main: " + str(server_table));
 		sleep(HEARTBEAT_INTERVAL / 1000.0);	# sleep in ms
 		heartbeat = str(HOSTNAME + "," + str(getloadavg()[0] / CPU_CORES) + "," + "0.14");
 		for ip in server_table:
 			if (server_table[ip]):
+				server_table[ip][0] += 1;
 				if (server_table[ip][0] > 60):
 					del server_table[ip];
 					continue;
-				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-				s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
-				server_table[ip][0] += 1;
+			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
+			print("Sending heartbeat to: " + str(ip));
+			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 
 main();
