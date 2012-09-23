@@ -23,7 +23,7 @@ def heartbeat_listener():
 	while True:
 		packet = s.recvfrom(128);
 		# A very conoluted way to get the data in place, using as little ram as possible.
-		server_table[packet[1][0]] = [0] + packet[0].split(',');
+		server_table[packet[1][0]] = [0, packet[0]];
 	return;
 
 def webservice_listener():
@@ -39,12 +39,7 @@ def webservice_listener():
 def webservice_handler(s):
 	data = "";
 	for ip in server_table:
-		tmp_str = "";
-		for i in server_table[ip]:
-			tmp_str += str(i);
-			if (i != server_table[ip][-1]):
-				tmp_str += ",";
-		data += tmp_str + "\r\n";
+		data += server_table[ip][1] + "\r\n";
 	s.send(data);
 	return
 
