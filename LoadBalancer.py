@@ -39,7 +39,7 @@ def webservice_listener():
 def webservice_handler(s):
 	data = "";
 	for ip in server_table:
-		data += server_table[ip][1] + "\r\n";
+		data += server_table[0] + "," + server_table[ip][1] + "\r\n";
 	s.send(data);
 	return
 
