@@ -24,9 +24,10 @@ def heartbeat_listener():
 	while True:
 		print("Looping in heartbeat thread.");
 		packet = s.recvfrom(128);
-		print("Got a heartbeat...");
+		print("Got a heartbeat: " + str(packet));
 		# A very conoluted way to get the data in place, using as little ram as possible.
-		server_table[packet[0][0]] = [0] + packet[0].split(',');
+		server_table[packet[1][0]] = [0] + packet[0].split(',');
+		print("server_table: " + str(server_table));
 	return;
 
 def webservice_listener():
