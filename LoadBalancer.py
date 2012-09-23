@@ -64,8 +64,8 @@ def main():
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
-				if (server_table[ip][0] > 60):
-					ghost_hosts.append(server_table[ip]);
+				if (server_table[ip][0] > 10):
+					ghost_hosts.append(ip);
 					continue;
 				server_table[ip][0] += 1;
 		for ip in ghost_hosts:
