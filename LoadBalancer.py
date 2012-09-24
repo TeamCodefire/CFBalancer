@@ -37,7 +37,7 @@ def parse_config(filename):
 		config[key] = val;
 	return config;
 
-def heartbeat_listener(SHARED_SECRET):
+def heartbeat_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((HEARTBEAT_HOST, HEARTBEAT_PORT));
 	while True:
@@ -66,12 +66,13 @@ def webservice_handler(s):
 
 def main():
 	config = parse_config(parse_config(CODEFIRE_CONFIG)['DATASTORE'] + CONFIG_FILE);
+	global SHARED_SECRET;
 	SHARED_SECRET = config['SHARED_SECRET'];
 
 	for ip in config['CODEFIRE_WEB_IPS']:
 		server_table[ip] = None;
 
-	t = Thread(target = heartbeat_listener, args = [SHARED_SECRET]);	# Start the heartbeat listener
+	t = Thread(target = heartbeat_listener);	# Start the heartbeat listener
 	t.daemon = True;
 	t.start();
 	t = Thread(target = webservice_listener);	# Start the webservice listener
