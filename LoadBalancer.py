@@ -25,7 +25,7 @@ def parse_config(filename):
 	config = dict();
 
 	for line in f.readlines():
-		if (line.strip()[0] == "#"):
+		if (line.strip() and line.strip()[0] == "#"):
 			continue;
 		line = line.split("=");
 		if (len(line) <= 1):
