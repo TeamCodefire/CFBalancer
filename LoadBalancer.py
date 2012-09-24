@@ -1,3 +1,4 @@
+from hashlib import sha256;
 from time import sleep;
 from threading import Thread;
 from multiprocessing import cpu_count;
@@ -13,7 +14,7 @@ HOSTNAME = socket.gethostname();
 CPU_CORES = cpu_count();
 CODEFIRE_CONFIG = '/etc/codefire';
 CONFIG_FILE = '/config/load-balancer.conf';
-CODEFIRE_WEB_IPS = list();
+SHARED_SECRET = str();
 
 del cpu_count;		# not strictly necessary, but it frees a bit of ram
 
@@ -38,9 +39,10 @@ def heartbeat_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((HEARTBEAT_HOST, HEARTBEAT_PORT));
 	while True:
-		packet = s.recvfrom(128);
-		# A slightly convoluted way to get the data in place, using as little ram as possible.
-		server_table[packet[1][0]] = [0, packet[0]];
+		packet = s.recvfrom(512);
+		if (packet[0][:64] == sha256(packet[0][64:] + SHARED_SECRET).hexdigest()):
+			# A slightly convoluted way to get the data in place, using as little ram as possible.
+			server_table[packet[1][0]] = [0, packet[0][64:]];
 	return;
 
 def webservice_listener():
@@ -61,12 +63,15 @@ def webservice_handler(s):
 	return
 
 def main():
-	CODEFIRE_WEB_IPS = parse_config(parse_config(CODEFIRE_CONFIG)['DATASTORE'] + CONFIG_FILE)['CODEFIRE_WEB_IPS'];
+	config = parse_config(parse_config(CODEFIRE_CONFIG)['DATASTORE'] + CONFIG_FILE);
+	SHARED_SECRET = config['SHARED_SECRET'];
 
-	for ip in CODEFIRE_WEB_IPS:
+	for ip in config['CODEFIRE_WEB_IPS']:
 		server_table[ip] = None;
 
-	t = Thread(target = heartbeat_listener);		# Start the heartbeat listener
+	del config;
+
+	t = Thread(target = heartbeat_listener);	# Start the heartbeat listener
 	t.daemon = True;
 	t.start();
 	t = Thread(target = webservice_listener);	# Start the webservice listener
@@ -83,7 +88,7 @@ def main():
 		for ip in server_table:
 			# Send a heartbeat to them.
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-			s.sendto(heartbeat, (ip, HEARTBEAT_PORT));
+			s.sendto(sha256(heartbeat + SHARED_SECRET).hexdigest() + heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
 				if (server_table[ip][0] > 10):
 					ghost_hosts.append(ip);
