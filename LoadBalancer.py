@@ -1,5 +1,5 @@
 from hashlib import sha256;
-from time import sleep;
+from time import sleep, mktime, gmtime;
 from threading import Thread;
 from multiprocessing import cpu_count;
 from os import getloadavg, path;
@@ -37,12 +37,12 @@ def parse_config(filename):
 		config[key] = val;
 	return config;
 
-def heartbeat_listener():
+def heartbeat_listener(SHARED_SECRET):
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((HEARTBEAT_HOST, HEARTBEAT_PORT));
 	while True:
 		packet = s.recvfrom(512);
-		if (packet[0][:64] == sha256(packet[0][64:] + SHARED_SECRET).hexdigest()):
+		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + SHARED_SECRET).hexdigest()):
 			# A slightly convoluted way to get the data in place, using as little ram as possible.
 			server_table[packet[1][0]] = [0, packet[0][64:]];
 	return;
@@ -71,16 +71,12 @@ def main():
 	for ip in config['CODEFIRE_WEB_IPS']:
 		server_table[ip] = None;
 
-	del config;
-
-	t = Thread(target = heartbeat_listener);	# Start the heartbeat listener
+	t = Thread(target = heartbeat_listener, args = [SHARED_SECRET]);	# Start the heartbeat listener
 	t.daemon = True;
 	t.start();
 	t = Thread(target = webservice_listener);	# Start the webservice listener
 	t.daemon = True;
 	t.start();
-
-	del t;
 
 	while True:
 		print("Main: " + str(server_table));
@@ -88,9 +84,8 @@ def main():
 		heartbeat = str(HOSTNAME + "," + str(getloadavg()[0] / CPU_CORES) + "," + "0.14");
 		ghost_hosts = list();
 		for ip in server_table:
-			# Send a heartbeat to them.
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-			s.sendto(sha256(heartbeat + SHARED_SECRET).hexdigest() + heartbeat, (ip, HEARTBEAT_PORT));
+			s.sendto(sha256(heartbeat + str(mktime(gmtime()))[:-3] + SHARED_SECRET).hexdigest() + heartbeat, (ip, HEARTBEAT_PORT));
 			if (server_table[ip]):
 				if (server_table[ip][0] > 10):
 					ghost_hosts.append(ip);
