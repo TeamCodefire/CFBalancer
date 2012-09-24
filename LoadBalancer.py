@@ -60,7 +60,8 @@ def webservice_listener():
 def webservice_handler(s):
 	data = str();
 	for ip in server_table:
-		data += server_table[0] + "," + server_table[ip][1] + "\r\n";
+		if (server_table[ip]):
+			data += str(server_table[ip][0]) + "," + server_table[ip][1] + "\r\n";
 	s.send(data);
 	return
 
