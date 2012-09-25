@@ -16,9 +16,8 @@ del cpu_count;		# not strictly necessary, but it frees a bit of ram
 
 server_table = dict();	# This is a local table storing the server loads
 
-def parse_config(filename):
+def load_config(filename):
 	f = open(filename, "r");
-	config = dict();
 
 	for line in f.readlines():
 		line = line.strip();
@@ -31,9 +30,7 @@ def parse_config(filename):
 		val = line[1].strip();
 		if (val.find(",") >= 0):
 			val = val.split(",");
-		config[key] = val;
-	print(config);
-	return config;
+		CONFIG[key] = val;
 
 def heartbeat_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
@@ -64,8 +61,8 @@ def webservice_handler(s):
 	return
 
 def main():
-	CONFIG.update(parse_config(CONFIG['CODEFIRE_CONFIG']));
-	CONFIG.update(parse_config(CONFIG['DATASTORE'] + CONFIG['CONFIG_FILE']));
+	load_config(CONFIG['CODEFIRE_CONFIG']);
+	load_config(CONFIG['DATASTORE'] + CONFIG['CONFIG_FILE']);
 
 	if (type(CONFIG['CODEFIRE_WEB_IPS']) == list):
 		for ip in CONFIG['CODEFIRE_WEB_IPS']:
