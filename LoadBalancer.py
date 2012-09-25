@@ -56,7 +56,10 @@ def webservice_handler(s):
 	data = str();
 	for ip in server_table:
 		if (server_table[ip]):
-			data += str(server_table[ip][0]) + "," + server_table[ip][1] + "\r\n";
+			if (server_table[ip][1].split(",")[0] == CONFIG['NODE_DL_CNAME']):
+				data += str(server_table[ip][0]) + "," + server_table[ip][1] + ",*\r\n";
+			else:
+				data += str(server_table[ip][0]) + "," + server_table[ip][1] + "\r\n";
 	s.send(data);
 	return
 
