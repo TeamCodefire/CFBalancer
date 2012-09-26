@@ -32,6 +32,17 @@ def load_config(filename):
 	f.close();
 	return;
 
+def get_netload():
+    f = open("/proc/net/dev", "r")
+    try:
+        lines = f.readlines()
+    finally:
+        f.close()
+
+    for line in lines:
+		if (line[:line.find(":")].strip() == CONFIG['NETLOAD_IFACE']):
+			return int(line[line.find(":"):].split()[9]);
+
 def heartbeat_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
@@ -85,10 +96,9 @@ def main():
 
 	while True:
 		print("Main: " + str(server_table));
-		netload = network(True)[CONFIG['NETLOAD_IFACE']].bytes_sent;
+		netload = get_netload();
 		sleep(int(CONFIG['HEARTBEAT_INTERVAL']) / 1000.0);			# sleep in ms
-		netload = network(True)[CONFIG['NETLOAD_IFACE']].bytes_sent - netload;
-		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(netload));
+		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(get_netload() - netload));
 		ghost_hosts = list();
 		for ip in server_table:
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
