@@ -1,18 +1,16 @@
-from threading import Thread;
 from hashlib import sha256;
-from time import sleep, mktime, gmtime;
-from os import getloadavg, path;
-import socket;
-
 from multiprocessing import cpu_count;
+from os import getloadavg;
+from psutil import network_io_counters as network;
+from threading import Thread;
+from time import sleep, mktime, gmtime;
+import socket;
 
 CONFIG = {
 	"CODEFIRE_CONFIG": '/etc/codefire',
 	"CONFIG_FILE": '/config/load-balancer.conf',
 	"CPU_CORES": cpu_count()
 }
-
-del cpu_count;		# not strictly necessary, but it frees a bit of ram
 
 server_table = dict();	# This is a local table storing the server loads
 
@@ -31,12 +29,14 @@ def load_config(filename):
 		if (val.find(",") >= 0):
 			val = val.split(",");
 		CONFIG[key] = val;
+	f.close();
+	return;
 
 def heartbeat_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 	s.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
 	while True:
-		packet = s.recvfrom(512);
+		packet = s.recvfrom(128);
 		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
 			# A slightly convoluted way to get the data in place, using as little ram as possible.
 			server_table[packet[1][0]] = [0, packet[0][64:]];
@@ -48,8 +48,7 @@ def webservice_listener():
 	s.listen(10);
 	while True:
 		sock = s.accept()[0]
-		t = Thread(target = webservice_handler, args = [sock]);
-		t.start();
+		Thread(target = webservice_handler, args = [sock]).start();
 	return;
 
 def webservice_handler(s):
@@ -67,6 +66,7 @@ def main():
 	load_config(CONFIG['CODEFIRE_CONFIG']);
 	load_config(CONFIG['DATASTORE'] + CONFIG['CONFIG_FILE']);
 
+	# CLEANUP -- Everything below this could use some cleaning.
 	if (type(CONFIG['CODEFIRE_WEB_IPS']) == list):
 		for ip in CONFIG['CODEFIRE_WEB_IPS']:
 			server_table[ip] = None;
@@ -80,10 +80,15 @@ def main():
 	t.daemon = True;
 	t.start();
 
+	# Not strictly necessary, but it frees up a bit of ram.
+	#del t, cpu_count, load_config;
+
 	while True:
 		print("Main: " + str(server_table));
+		netload = network(True)[CONFIG['NETLOAD_IFACE']].bytes_sent;
 		sleep(int(CONFIG['HEARTBEAT_INTERVAL']) / 1000.0);			# sleep in ms
-		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + "0.14");
+		netload = network(True)[CONFIG['NETLOAD_IFACE']].bytes_sent - netload;
+		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(netload));
 		ghost_hosts = list();
 		for ip in server_table:
 			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
