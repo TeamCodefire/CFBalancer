@@ -12,7 +12,32 @@ CONFIG = {
 	"CPU_CORES": cpu_count()
 }
 
+send_heartbeat = True;
+
 server_table = dict();	# This is a local table storing the server loads
+
+### API ###
+
+def pause_heartbeat(msg):
+	send_heartbeat = False;
+
+def resume_heartbeat(msg):
+	send_heartbeat = True;
+
+def ignore_host(msg):
+	pass;
+
+def unignore_host(msg):
+	pass;
+
+### End API ###
+
+API = {
+	'P': pause_heartbeat,		# Pause heartbeats
+	'R': resume_heartbeat,		# Resume heartbeats
+	'I': ignore_host,			# Ignore host
+	'U': unignore_host,			# Unignore host
+}
 
 def load_config(filename):
 	f = open(filename, "r");
@@ -30,7 +55,6 @@ def load_config(filename):
 			val = val.split(",");
 		CONFIG[key] = val;
 	f.close();
-	return;
 
 def get_netload():
     f = open("/proc/net/dev", "r")
@@ -51,7 +75,6 @@ def heartbeat_listener():
 		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
 			# A slightly convoluted way to get the data in place, using as little ram as possible.
 			server_table[packet[1][0]] = [0, packet[0][64:]];
-	return;
 
 def webservice_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
@@ -60,7 +83,6 @@ def webservice_listener():
 	while True:
 		sock = s.accept()[0]
 		Thread(target = webservice_handler, args = [sock]).start();
-	return;
 
 def webservice_handler(s):
 	data = str();
@@ -71,7 +93,6 @@ def webservice_handler(s):
 			else:
 				data += str(server_table[ip][0]) + "," + server_table[ip][1] + "\r\n";
 	s.send(data);
-	return
 
 def main():
 	load_config(CONFIG['CODEFIRE_CONFIG']);
@@ -91,9 +112,6 @@ def main():
 	t.daemon = True;
 	t.start();
 
-	# Not strictly necessary, but it frees up a bit of ram.
-	#del t, cpu_count, load_config;
-
 	while True:
 		print("Main: " + str(server_table));
 		netload = get_netload();
@@ -101,8 +119,9 @@ def main():
 		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(get_netload() - netload));
 		ghost_hosts = list();
 		for ip in server_table:
-			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-			s.sendto(sha256(heartbeat + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
+			if (send_heartbeat):
+				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
+				s.sendto(sha256(heartbeat + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
 			if (server_table[ip]):
 				if (server_table[ip][0] > 10):
 					ghost_hosts.append(ip);
