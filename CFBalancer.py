@@ -35,9 +35,12 @@ def load_config(filename):
 	return;
 
 def get_netload():
-    f = open("/proc/net/dev", "r");
-    lines = f.readlines();
-    f.close();
+	try:
+		f = open("/proc/net/dev", "r");
+		lines = f.readlines();
+		f.close();
+	except:
+		return;
 
     for line in lines:
 		if (line[:line.find(":")].strip() == CONFIG['NETLOAD_IFACE']):
