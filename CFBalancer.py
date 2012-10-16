@@ -12,32 +12,8 @@ CONFIG = {
 	"CPU_CORES": cpu_count()
 }
 
-send_heartbeat = True;
-
-server_table = dict();	# This is a local table storing the server loads
-
-### API ###
-
-def pause_heartbeat(msg):
-	send_heartbeat = False;
-
-def resume_heartbeat(msg):
-	send_heartbeat = True;
-
-def ignore_host(msg):
-	pass;
-
-def unignore_host(msg):
-	pass;
-
-### End API ###
-
-API = {
-	'P': pause_heartbeat,		# Pause heartbeats
-	'R': resume_heartbeat,		# Resume heartbeats
-	'I': ignore_host,			# Ignore host
-	'U': unignore_host,			# Unignore host
-}
+send_heartbeats = True;
+server_table = dict();	# The local table that stores the server loads.
 
 def load_config(filename):
 	f = open(filename, "r");
@@ -56,6 +32,8 @@ def load_config(filename):
 		CONFIG[key] = val;
 	f.close();
 
+	return;
+
 def get_netload():
     f = open("/proc/net/dev", "r")
     try:
@@ -73,8 +51,18 @@ def heartbeat_listener():
 	while True:
 		packet = s.recvfrom(128);
 		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
-			# A slightly convoluted way to get the data in place, using as little ram as possible.
-			server_table[packet[1][0]] = [0, packet[0][64:]];
+			server_table[packet[1][0]] = [0, packet[0][64:]];	# Get the data in place, without wasting RAM.
+
+def control_listener():
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+	s.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
+	s.listen(5);
+
+	while True:
+		sock = s.accept()[0];
+		packet = s.recv(128)[0];
+		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
+			pass;
 
 def webservice_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
@@ -88,6 +76,7 @@ def webservice_handler(s):
 	data = str();
 	for ip in server_table:
 		if (server_table[ip]):
+			# CLEANUP -- This could be done in two lines?
 			if (server_table[ip][1].split(",")[0] == CONFIG['NODE_DL_CNAME']):
 				data += str(server_table[ip][0]) + "," + server_table[ip][1] + ",*\r\n";
 			else:
@@ -105,30 +94,41 @@ def main():
 	else:
 		server_table[CONFIG['CODEFIRE_WEB_IPS']] = None;
 
+	# Setup control socket.
+	control_socket.setblocking(False);
+	control_socket.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
+	control_socket.listen(5);
+
 	t = Thread(target = heartbeat_listener);	# Start the heartbeat listener
 	t.daemon = True;
 	t.start();
+
+	t = Thread(target = control_listener);		# Start the control listener
+	t.daemon = True;
+	t.start();
+
 	t = Thread(target = webservice_listener);	# Start the webservice listener
 	t.daemon = True;
 	t.start();
 
 	while True:
 		print("Main: " + str(server_table));
+
+		# Build the heartbeat, and sleep for 1 second.
 		netload = get_netload();
-		sleep(int(CONFIG['HEARTBEAT_INTERVAL']) / 1000.0);			# sleep in ms
-		heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(get_netload() - netload));
-		ghost_hosts = list();
+		sleep(int(CONFIG['HEARTBEAT_INTERVAL']) / 1000.0);		# sleep in ms
+		if (send_heartbeats):
+			heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(get_netload() - netload));
+
 		for ip in server_table:
-			if (send_heartbeat):
+			# Send our heartbeat to this host.
+			if (heartbeat):
 				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 				s.sendto(sha256(heartbeat + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
-			if (server_table[ip]):
-				if (server_table[ip][0] > 10):
-					ghost_hosts.append(ip);
-					continue;
-				server_table[ip][0] += 1;
-		for ip in ghost_hosts:
-			del server_table[ip];
 
-if (__name__ == "__main__"):
-	main();
+			if (server_table[ip]):
+				server_table[ip][0] += 1;
+				if (server_table[ip][0] > 10):
+					server_table[ip] = None;	# Much like del
+
+main();
