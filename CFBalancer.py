@@ -51,8 +51,9 @@ def heartbeat_listener():
 	s.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
 	while True:
 		packet = s.recvfrom(128);
-		if (packet[0][:64] == sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
-			server_table[packet[1][0]] = [0, packet[0][64:]];	# Get the data in place, without wasting RAM.
+		if (packet[0][:64] != sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
+			continue;		# If security hash doesn't match, discard the packet.
+		server_table[packet[1][0]] = [0, packet[0][64:]];		# Get the data in place, using little RAM.
 
 def control_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
@@ -62,8 +63,8 @@ def control_listener():
 	while True:
 		sock = s.accept()[0];
 		packet = s.recv(128)[0];
-		if (packet[0][:64] == sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
-			pass;
+		if (packet[0][:64] != sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
+			continue;		# If security hash doesn't match, discard the packet.
 
 def webservice_listener():
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
@@ -95,11 +96,6 @@ def main():
 	else:
 		server_table[CONFIG['CODEFIRE_WEB_IPS']] = None;
 
-	# Setup control socket.
-	control_socket.setblocking(False);
-	control_socket.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
-	control_socket.listen(5);
-
 	t = Thread(target = heartbeat_listener);	# Start the heartbeat listener
 	t.daemon = True;
 	t.start();
@@ -122,7 +118,7 @@ def main():
 			heartbeat = str(CONFIG['NODE_DL_CNAME'] + "," + str(getloadavg()[0] / CONFIG['CPU_CORES']) + "," + str(get_netload() - netload));
 
 		for ip in server_table:
-			# Send our heartbeat to this host.
+			# Send our heartbeat to the host.
 			if (heartbeat):
 				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
 				s.sendto(sha256(heartbeat + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
