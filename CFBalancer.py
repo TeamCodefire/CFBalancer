@@ -3,7 +3,7 @@ from multiprocessing import cpu_count;
 from os import getloadavg;
 from psutil import network_io_counters as network;
 from threading import Thread;
-from time import sleep, mktime, gmtime;
+from time import sleep;
 import socket;
 
 CONFIG = {
@@ -50,7 +50,7 @@ def heartbeat_listener():
 	s.bind((CONFIG['NODE_PRIVATE_IP'], int(CONFIG['HEARTBEAT_PORT'])));
 	while True:
 		packet = s.recvfrom(128);
-		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
+		if (packet[0][:64] == sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
 			server_table[packet[1][0]] = [0, packet[0][64:]];	# Get the data in place, without wasting RAM.
 
 def control_listener():
@@ -61,7 +61,7 @@ def control_listener():
 	while True:
 		sock = s.accept()[0];
 		packet = s.recv(128)[0];
-		if (packet[0][:64] == sha256(packet[0][64:] + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest()):
+		if (packet[0][:64] == sha256(packet[0][64:] + CONFIG['SHARED_SECRET']).hexdigest()):
 			pass;
 
 def webservice_listener():
@@ -124,7 +124,7 @@ def main():
 			# Send our heartbeat to this host.
 			if (heartbeat):
 				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
-				s.sendto(sha256(heartbeat + str(mktime(gmtime()))[:-3] + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
+				s.sendto(sha256(heartbeat + CONFIG['SHARED_SECRET']).hexdigest() + heartbeat, (ip, int(CONFIG['HEARTBEAT_PORT'])));
 
 			if (server_table[ip]):
 				server_table[ip][0] += 1;
