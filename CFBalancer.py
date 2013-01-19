@@ -3,9 +3,12 @@ from hashlib import sha256;
 from multiprocessing import cpu_count;
 from os import getloadavg;
 
+from twisted.internet.protocol import DatagramProtocol
+from twisted.internet import reactor
+
 # A global dict to contain the config.
 config = {
-	'CONFIG_FILE': '/config/load-balancer.conf',
+	'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
 	'CPU_CORES': cpu_count(),
 	'SEND_HEARTBEATS': True
 }
@@ -55,6 +58,13 @@ def get_netload():
 		if (line[:line.index(':')].strip() == config['NETLOAD_IFACE']):
 			return int(line[line.find(':'):].split()[9]);
 
+class Heartbeat(DatagramProtocol):
+	"""Monitors for heartbeats, and updates the server_table with each one."""
+	def datagramReceived(self, data, (host, port)):
+		print(data);
+		if (data[:64] == sha256(data[64:] + config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
+			server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
+
 def main():
 	argparser = argparse.ArgumentParser(description = 'CodeFire load balancer daemon.');
 	argparser.add_argument('--config');
@@ -65,8 +75,6 @@ def main():
 	else:
 		config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
 
-	print(config);
-
 	try:
 		for ip in config['CODEFIRE_WEB_IPS']:
 			server_table[ip] = None;
@@ -74,7 +82,12 @@ def main():
 		exit(-1);
 
 	# Free up some ram.
-	del cpu_count;
+	global cpu_count, parse_config;
+	del cpu_count, parse_config;
+
+	# Now start the real work.
+	reactor.listenUDP(int(config['HEARTBEAT_PORT']), Heartbeat());
+	reactor.run()
 
 if __name__ == '__main__':
 	main();
