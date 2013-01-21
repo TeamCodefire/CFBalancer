@@ -9,7 +9,7 @@ from twisted.internet import reactor, task;
 
 # Globals
 txbytes = None;
-netload = None;
+heartbeat_process = None;
 
 # A global dict to contain the config.
 config = {
@@ -50,7 +50,7 @@ def parse_config(filename):
 
 	return config;
 
-def update_netload(old_txbytes):
+def get_netload(old_txbytes):
 	"""Returns the current txbytes for the interface, read from /proc"""
 	global txbytes, netload;
 
@@ -64,19 +64,19 @@ def update_netload(old_txbytes):
 	for line in lines:
 		if (line[:line.find(':')].strip() == config['NETLOAD_INTERFACE']):
 			txbytes = int(line[line.find(':'):].split()[9]);
-			netload = txbytes - old_txbytes;
+			return txbytes - old_txbytes;
 
-def send_heartbeats(hosts):
-	heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(netload));
+def send_heartbeats(*args, **kwargs):
+	"""Send out heartbeats, to all hosts."""
+	heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(kwargs['netload']));
 	for host in hosts:
 		socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(config['HEARTBEAT_PORT'])));
 
 def update_server_table():
-	update_netload(txbytes);
-
+	"""Update the server_table, and send out heartbeats."""
+	print(server_table);
 	if (config['SEND_HEARTBEATS']):
-		print(server_table);
-		Process(target = send_heartbeats, args = [server_table.keys()]).start();
+		Process(target = send_heartbeats, args = server_table.keys(), kwargs = {'netload': get_netload(txbytes)}).start();
 
 	for ip in server_table.keys():		# For every ip in the server table...
 		if (server_table[ip]):				# If the ip is still in the server_table...
@@ -92,6 +92,7 @@ class Heartbeat(DatagramProtocol):
 			server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
 
 def main():
+	"""Initialize everything, and start the event loop."""
 	argparser = argparse.ArgumentParser(description = 'CodeFire load balancer daemon.');
 	argparser.add_argument('--config');
 	args = argparser.parse_args();
@@ -116,6 +117,7 @@ def main():
 	del cpu_count;
 
 	# Now start the real work.
+	p = Process(target = send_heartbeats);
 	reactor.listenUDP(int(config['HEARTBEAT_PORT']), Heartbeat());
 	task.LoopingCall(update_server_table).start(int(config['HEARTBEAT_INTERVAL']) / 1000.0);
 	reactor.run()
