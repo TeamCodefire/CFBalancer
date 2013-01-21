@@ -69,7 +69,7 @@ def get_netload(old_txbytes):
 def send_heartbeats(*args, **kwargs):
 	"""Send out heartbeats, to all hosts."""
 	heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(kwargs['netload']));
-	for host in hosts:
+	for host in args:
 		socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(config['HEARTBEAT_PORT'])));
 
 def update_server_table():
