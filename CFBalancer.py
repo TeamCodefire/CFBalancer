@@ -15,6 +15,7 @@ config = {
 	'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
 	'CPU_CORES': multiprocessing.cpu_count(),
 	'DAEMON': False,
+	'VERBOSE': True,
 	'SEND_HEARTBEATS': True
 }
 
@@ -84,7 +85,7 @@ def send_heartbeats(pipe):
 
 def update_server_table():
 	"""Update the server_table, and send out heartbeats."""
-	if (not config['DAEMON']):
+	if (config['VERBOSE']):
 		print(server_table);
 
 	if (config['SEND_HEARTBEATS']):
@@ -130,7 +131,7 @@ def main():
 	except:
 		exit(-1);
 
-	# Start the heartbeat process...
+	# Start the heartbeat process.
 	rxpipe, heartbeat_pipe = multiprocessing.Pipe(False);
 	multiprocessing.Process(target = send_heartbeats, args = [rxpipe]).start();
 
