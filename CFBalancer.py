@@ -4,7 +4,7 @@ from hashlib import sha256;
 from os import getloadavg;
 from socket import socket, AF_INET, SOCK_DGRAM;
 
-from twisted.internet.protocol import DatagramProtocol;
+from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
 from twisted.internet import reactor, task;
 
 # Globals
@@ -105,6 +105,14 @@ class Heartbeat(DatagramProtocol):
 		if (data[:64] == sha256(data[64:] + config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
 			server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
 
+class Api(Protocol):
+	def dataReceived(self, data):
+		self.transport.write("\r\n".join([str(server_table[ip][0]) + "," + server_table[ip][1] + (",*" if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']) else "") for ip in server_table]) + "\r\n");
+		self.transport.loseConnection();
+
+class ApiFactory(Factory):
+	protocol = Api;
+
 def main():
 	"""Initialize everything, and start the event loop."""
 	global heartbeat_pipe;
@@ -140,6 +148,7 @@ def main():
 
 	# Register the listeners and start the event loop.
 	reactor.listenUDP(int(config['HEARTBEAT_PORT']), Heartbeat());
+	reactor.listenTCP(int(config['API_PORT']), ApiFactory());
 	task.LoopingCall(update_server_table).start(int(config['HEARTBEAT_INTERVAL']) / 1000.0);
 	reactor.run()
 
