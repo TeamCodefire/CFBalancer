@@ -108,7 +108,14 @@ class Heartbeat(DatagramProtocol):
 class Api(Protocol):
 	"""Handler for API requests."""
 	def dataReceived(self, data):
-		self.transport.write("\r\n".join([str(server_table[ip][0]) + "," + server_table[ip][1] + (",*" if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']) else "") for ip in server_table]) + "\r\n");
+		loads = str();
+		for ip in server_table:
+			loads += str(server_table[ip][0]) + "," + server_table[ip][1];
+			if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']):
+				loads += ",*";
+			loads += "\r\n";
+
+		self.transport.write(loads);
 		self.transport.loseConnection();
 
 class ApiFactory(Factory):
