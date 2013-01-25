@@ -148,7 +148,6 @@ def main():
 	group.add_argument('-u', '--unignore', help = 'inverse of --ignore', action = 'store_true');
 
 	args = argparser.parse_args();
-	print(args);
 
 	# Load the configs.
 	if (args.config):
