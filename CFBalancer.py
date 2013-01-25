@@ -105,8 +105,8 @@ class Heartbeat(DatagramProtocol):
 		if (data[:64] == sha256(data[64:] + config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
 			server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
 
-class Api(Protocol):
-	"""Handler for API requests."""
+class Control(Protocol):
+	"""Control socket handler."""
 	def dataReceived(self, data):
 		loads = str();
 		for ip in server_table:
@@ -118,9 +118,9 @@ class Api(Protocol):
 		self.transport.write(loads);
 		self.transport.loseConnection();
 
-class ApiFactory(Factory):
-	"""Api Facrtory, to spawn Api objects for each request."""
-	protocol = Api;
+class ControlFactory(Factory):
+	"""Control socket factory, to spawn Control objects for each request."""
+	protocol = Control;
 
 def main():
 	"""Initialize everything, and start the event loop."""
@@ -157,7 +157,7 @@ def main():
 
 	# Register the listeners and start the event loop.
 	reactor.listenUDP(int(config['HEARTBEAT_PORT']), Heartbeat());
-	reactor.listenTCP(int(config['API_PORT']), ApiFactory());
+	reactor.listenTCP(int(config['CONTROL_PORT']), ControlFactory());
 	task.LoopingCall(update_server_table).start(int(config['HEARTBEAT_INTERVAL']) / 1000.0);
 	reactor.run()
 
