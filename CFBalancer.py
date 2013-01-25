@@ -2,7 +2,7 @@ import argparse;
 import multiprocessing;
 from hashlib import sha256;
 from os import getloadavg;
-from socket import socket, AF_INET, SOCK_DGRAM;
+from socket import socket, AF_INET, SOCK_DGRAM, SOCK_STREAM;
 
 from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
 from twisted.internet import reactor, task;
@@ -19,6 +19,9 @@ config = {
 	'SEND_HEARTBEATS': True,
 	'VERBOSE': True
 }
+
+# A global dict to contain api functions.
+API = dict();
 
 # The table that stores the server list, and their respective loads.
 server_table = dict();
@@ -51,6 +54,10 @@ def parse_config(filename):
 	f.close();
 
 	return config;
+
+def call_api(api_method, *args):
+	if (api_method):
+		return str(API[api_method](*args));
 
 def send_heartbeats(pipe):
 	"""Send out heartbeats, to all hosts."""
@@ -105,6 +112,38 @@ def update_server_table():
 			else:							# Otherwise...
 				server_table[ip][0] += 1;	# ...increase the count since we last heard from them.
 
+def api_list():
+	loads = str();
+	for ip in server_table:
+		loads += str(server_table[ip][0]) + "," + server_table[ip][1];
+		if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']):
+			loads += ",*";
+		loads += "\r\n";
+	return loads;
+
+def api_ignore():
+	config['IGNORE'] = True;
+	return config['IGNORE'];
+
+def api_unignore():
+	config['IGNORE'] = False;
+	return config['IGNORE'];
+
+def api_pause():
+	config['SEND_HEARTBEATS'] = False;
+	return config['SEND_HEARTBEATS'];
+
+def api_resume():
+	config['SEND_HEARTBEATS'] = True;
+	return config['SEND_HEARTBEATS'];
+
+API['L'] = api_list;
+API['S'] = api_list;
+API['I'] = api_ignore;
+API['U'] = api_unignore;
+API['P'] = api_pause;
+API['R'] = api_resume;
+
 class Heartbeat(DatagramProtocol):
 	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
 	def datagramReceived(self, data, (host, port)):
@@ -114,19 +153,25 @@ class Heartbeat(DatagramProtocol):
 class Control(Protocol):
 	"""Control socket handler."""
 	def dataReceived(self, data):
-		loads = str();
-		for ip in server_table:
-			loads += str(server_table[ip][0]) + "," + server_table[ip][1];
-			if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']):
-				loads += ",*";
-			loads += "\r\n";
-
-		self.transport.write(loads);
+		self.transport.write(call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
 		self.transport.loseConnection();
 
 class ControlFactory(Factory):
 	"""Control socket factory, to spawn Control objects for each request."""
 	protocol = Control;
+
+class ApiAction(argparse.Action):
+	def __call__(self, parser, args, values, option_string=None):
+		if (args.config):
+			config.update(parse_config(args.config));
+		else:
+			config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
+
+		s = socket(AF_INET, SOCK_STREAM);
+		s.connect(('localhost', int(config['CONTROL_PORT'])));
+		s.sendall(option_string.translate(None, ' -')[0].upper());
+		print(s.recv(4096));
+		exit();
 
 def main():
 	"""Initialize everything, and start the event loop."""
@@ -140,12 +185,12 @@ def main():
 
 	group = argparser.add_mutually_exclusive_group();
 	group.add_argument('-d', '--daemon', help = 'enable daemon mode', action = 'store_true');
-	group.add_argument('-i', '--ignore', help = 'set our heartbeat payload to "IGNORE"', action = 'store_true');
-	group.add_argument('-l', '--list', help = 'print the server table in a pretty way', action = 'store_true');
-	group.add_argument('-p', '--pause', help = 'pause heartbeats', action = 'store_true');
-	group.add_argument('-r', '--resume', help = 'resume heartbeats', action = 'store_true');
-	group.add_argument('-s', '--show', help = 'same as --list', action = 'store_true');
-	group.add_argument('-u', '--unignore', help = 'inverse of --ignore', action = 'store_true');
+	group.add_argument('-i', '--ignore', help = 'set our heartbeat payload to "IGNORE"', action = ApiAction, nargs = 0);
+	group.add_argument('-l', '--list', help = 'print the server table in a pretty way', action = ApiAction, nargs = 0);
+	group.add_argument('-p', '--pause', help = 'pause heartbeats', action = ApiAction, nargs = 0);
+	group.add_argument('-r', '--resume', help = 'resume heartbeats', action = ApiAction, nargs = 0);
+	group.add_argument('-s', '--show', help = 'same as --list', action = ApiAction, nargs = 0);
+	group.add_argument('-u', '--unignore', help = 'inverse of --ignore', action = ApiAction, nargs = 0);
 
 	args = argparser.parse_args();
 
