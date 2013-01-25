@@ -9,6 +9,7 @@ from twisted.internet import reactor, task;
 
 # Globals
 heartbeat_pipe = None;
+API = dict();	# A global dict to contain api functions.
 
 # A global dict to contain the config.
 config = {
@@ -17,11 +18,8 @@ config = {
 	'DAEMON': False,
 	'IGNORE': False,
 	'SEND_HEARTBEATS': True,
-	'VERBOSE': True
+	'VERBOSE': False
 }
-
-# A global dict to contain api functions.
-API = dict();
 
 # The table that stores the server list, and their respective loads.
 server_table = dict();
@@ -198,11 +196,20 @@ def main():
 
 	args = argparser.parse_args();
 
-	# Load the configs.
+	# Load the args and configs.
+	config['DAEMON'] = args.daemon;
+	config['VERBOSE'] = args.verbose;
+
 	if (args.config):
-		config.update(parse_config(args.config));
+		config['CONFIG_FILE'] = args.config;
 	else:
 		config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
+
+	try:
+		config.update(parse_config(config['CONFIG_FILE']));
+	except:
+		print("Error parsing config file.");
+		exit(-1);
 
 	# Add the default hosts.
 	try:
