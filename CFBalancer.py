@@ -162,16 +162,20 @@ class ControlFactory(Factory):
 
 class ApiAction(argparse.Action):
 	def __call__(self, parser, args, values, option_string=None):
-		if (args.config):
-			config.update(parse_config(args.config));
-		else:
-			config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
+		try:
+			if (args.config):
+				config.update(parse_config(args.config));
+			else:
+				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
 
-		s = socket(AF_INET, SOCK_STREAM);
-		s.connect(('localhost', int(config['CONTROL_PORT'])));
-		s.sendall(option_string.translate(None, ' -')[0].upper());
-		print(s.recv(4096));
-		exit();
+			s = socket(AF_INET, SOCK_STREAM);
+			s.connect(('localhost', int(config['CONTROL_PORT'])));
+			s.sendall(option_string.translate(None, ' -')[0].upper());
+			print(s.recv(4096));
+		except:
+			print("There was an error.");
+
+		exit(-1);
 
 def main():
 	"""Initialize everything, and start the event loop."""
