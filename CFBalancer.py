@@ -134,8 +134,21 @@ def main():
 
 	# Handle the argument parser.
 	argparser = argparse.ArgumentParser(description = 'Team CodeFire load reporting daemon.');
-	argparser.add_argument('--config');
+
+	argparser.add_argument('-c', '--config', help = 'the config file to use');
+	argparser.add_argument('-v', '--verbose', help = 'enable verbose output', action = 'store_true');
+
+	group = argparser.add_mutually_exclusive_group();
+	group.add_argument('-d', '--daemon', help = 'enable daemon mode', action = 'store_true');
+	group.add_argument('-i', '--ignore', help = 'set our heartbeat payload to "IGNORE"', action = 'store_true');
+	group.add_argument('-l', '--list', help = 'print the server table in a pretty way', action = 'store_true');
+	group.add_argument('-p', '--pause', help = 'pause heartbeats', action = 'store_true');
+	group.add_argument('-r', '--resume', help = 'resume heartbeats', action = 'store_true');
+	group.add_argument('-s', '--show', help = 'same as --list', action = 'store_true');
+	group.add_argument('-u', '--unignore', help = 'inverse of --ignore', action = 'store_true');
+
 	args = argparser.parse_args();
+	print(args);
 
 	# Load the configs.
 	if (args.config):
