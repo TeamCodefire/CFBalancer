@@ -15,8 +15,9 @@ config = {
 	'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
 	'CPU_CORES': multiprocessing.cpu_count(),
 	'DAEMON': False,
-	'VERBOSE': True,
-	'SEND_HEARTBEATS': True
+	'IGNORE': False,
+	'SEND_HEARTBEATS': True,
+	'VERBOSE': True
 }
 
 # The table that stores the server list, and their respective loads.
@@ -73,12 +74,17 @@ def send_heartbeats(pipe):
 				txbytes += netload;
 
 		if (pipe.poll()):
+			data = pipe.recv();
+
 			# Build the heartbeat.
-			heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(netload));
+			if (data['payload']):
+				heartbeat = data['payload'];
+			else:
+				heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(netload));
 
 			# And send it to every host in the list.
 			try:
-				for host in pipe.recv():
+				for host in data['hosts']:
 					socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(config['HEARTBEAT_PORT'])));
 			except:
 				pass;
@@ -90,7 +96,7 @@ def update_server_table():
 
 	if (config['SEND_HEARTBEATS']):
 		# Send hosts list to the heartbeat subprocess.
-		heartbeat_pipe.send(server_table.keys());
+		heartbeat_pipe.send({'hosts': server_table.keys(), 'payload': ('IGNORE' if config['IGNORE'] else False)});
 
 	for ip in server_table.keys():		# For every ip in the server table...
 		if (server_table[ip]):				# If the ip is still in the server_table...
