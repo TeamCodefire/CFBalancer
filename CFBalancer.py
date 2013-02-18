@@ -36,7 +36,7 @@ def parse_config(filename):
 
 	return config;
 
-def send_heartbeats(pipe):
+def send_heartbeats(pipe, config):
 		"""Send out heartbeats, to all hosts."""
 		from time import sleep;
 
@@ -73,8 +73,51 @@ def send_heartbeats(pipe):
 				except:
 					pass;
 
+class Heartbeat(DatagramProtocol):
+	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
+	def __init__(self, cfbalancer):
+		self.balancer = cfbalancer;
+
+	def datagramReceived(self, data, (host, port)):
+		if (data[:64] == sha256(data[64:] + self.balancer.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
+			self.balancer.server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
+
+class Control(Protocol):
+	"""Control socket handler."""
+	def __init__(self, cfbalancer):
+		self.balancer = cfbalancer;
+
+	def dataReceived(self, data):
+		self.transport.write(self.balancer.call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
+		self.transport.loseConnection();
+
+class ControlFactory(Factory):
+	"""Control socket factory, to spawn Control objects for each request."""
+	def __init__(self, cfbalancer):
+		self.balancer = cfbalancer;
+
+	def buildProtocol(self):
+		return Control(self.balancer);
+
+class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
+	def __call__(self, parser, args, values, option_string=None):
+		try:
+			if (not args.config):
+				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
+
+			config.update(parse_config(args.config));
+
+			s = socket(AF_INET, SOCK_STREAM);
+			s.connect(('localhost', int(config['CONTROL_PORT'])));
+			s.sendall(option_string.translate(None, ' -')[0].upper());
+			print(s.recv(4096));
+		except:
+			print("There was an error.");
+
+		exit();
+
 class CFBalancer(object):
-	def __init__(self, config):
+	def __init__(self, config = None):
 		self.heartbeat_pipe = None;
 		self.config = dict();			# A dict for the local config
 		self.server_table = dict();		# A dict for the server loads
@@ -103,18 +146,14 @@ class CFBalancer(object):
 
 		# Start the heartbeat process.
 		rxpipe, self.heartbeat_pipe = multiprocessing.Pipe(False);
-		multiprocessing.Process(target = send_heartbeats, args = [rxpipe]).start();
-		del rxpipe;		# Free up some ram.
+		multiprocessing.Process(target = send_heartbeats, args = [rxpipe, self.config]).start();
+		del rxpipe;				# Free up some ram.
 
 		# Register the listeners and start the event loop.
-		reactor.listenUDP(int(self.config['HEARTBEAT_PORT']), self.Heartbeat());
-		reactor.listenTCP(int(self.config['CONTROL_PORT']), self.ControlFactory());
+		reactor.listenUDP(int(self.config['HEARTBEAT_PORT']), Heartbeat(self));
+		reactor.listenTCP(int(self.config['CONTROL_PORT']), ControlFactory(self));
 		task.LoopingCall(self.update_server_table).start(int(self.config['HEARTBEAT_INTERVAL']) / 1000.0);
 		reactor.run()
-
-	def call_api(self, api_method, *args):
-		if (api_method in self.API):
-			return str(self.API[api_method](*args));
 
 	def update_server_table(self):
 		"""Update the server_table, and send out heartbeats."""
@@ -133,6 +172,10 @@ class CFBalancer(object):
 					del self.server_table[ip];			# ...delete the host from server_table.
 				else:									# Otherwise...
 					self.server_table[ip][0] += 1;		# ...increase the count since we last heard from them.
+
+	def call_api(self, api_method, *args):
+		if (api_method in self.API):
+			return str(self.API[api_method](*args));
 
 	def api_list(self):
 		loads = str();
@@ -158,40 +201,6 @@ class CFBalancer(object):
 	def api_resume(self):
 		self.config['SEND_HEARTBEATS'] = True;
 		return self.config['SEND_HEARTBEATS'];
-
-
-class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
-	def __call__(self, parser, args, values, option_string=None):
-		try:
-			if (not args.config):
-				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
-
-			config.update(parse_config(args.config));
-
-			s = socket(AF_INET, SOCK_STREAM);
-			s.connect(('localhost', int(config['CONTROL_PORT'])));
-			s.sendall(option_string.translate(None, ' -')[0].upper());
-			print(s.recv(4096));
-		except:
-			print("There was an error.");
-
-		exit();
-
-class Heartbeat(DatagramProtocol):
-	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
-	def datagramReceived(self, data, (host, port)):
-		if (data[:64] == sha256(data[64:] + balancer.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-			balancer.server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
-
-class ControlFactory(Factory):
-	"""Control socket factory, to spawn Control objects for each request."""
-	protocol = Control;
-
-class Control(Protocol):
-	"""Control socket handler."""
-	def dataReceived(self, data):
-		self.transport.write(balancer.call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
-		self.transport.loseConnection();
 
 def main():
 	"""Initialize everything, and start the event loop."""
@@ -234,6 +243,8 @@ def main():
 	except:
 		print("Error parsing config file.");
 		exit(-1);
+
+	balancer = CFBalancer(config);
 
 if __name__ == '__main__':
 	main();
