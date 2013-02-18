@@ -2,7 +2,6 @@ import argparse;
 import multiprocessing;
 from hashlib import sha256;
 from os import getloadavg;
-from socket import socket, AF_INET, SOCK_DGRAM, SOCK_STREAM;
 
 from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
 from twisted.internet import reactor, task;
@@ -39,12 +38,12 @@ def parse_config(filename):
 def send_heartbeats(pipe, config):
 		"""Send out heartbeats, to all hosts."""
 		from time import sleep;
+		from socket import socket, AF_INET, SOCK_DGRAM;
 
 		netload = 0;
 		txbytes = 0;
 
 		while (True):
-			sleep(1);
 			try:
 				f = open('/proc/net/dev', 'r');
 				lines = f.readlines();
@@ -73,6 +72,8 @@ def send_heartbeats(pipe, config):
 				except:
 					pass;
 
+			sleep(int(config['HEARTBEAT_INTERVAL']) / 1000.0);
+
 class Heartbeat(DatagramProtocol):
 	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
 	def __init__(self, cfbalancer):
@@ -80,7 +81,7 @@ class Heartbeat(DatagramProtocol):
 
 	def datagramReceived(self, data, (host, port)):
 		if (data[:64] == sha256(data[64:] + self.balancer.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-			self.balancer.server_table[host] = [0, data[64:]]		# ...update the server table with the heartbeat data.
+			self.balancer.server_table[host] = [0, data[64:]]										# ...update the server table.
 
 class Control(Protocol):
 	"""Control socket handler."""
@@ -96,25 +97,8 @@ class ControlFactory(Factory):
 	def __init__(self, cfbalancer):
 		self.balancer = cfbalancer;
 
-	def buildProtocol(self):
+	def buildProtocol(self, addr):
 		return Control(self.balancer);
-
-class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
-	def __call__(self, parser, args, values, option_string=None):
-		try:
-			if (not args.config):
-				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
-
-			config.update(parse_config(args.config));
-
-			s = socket(AF_INET, SOCK_STREAM);
-			s.connect(('localhost', int(config['CONTROL_PORT'])));
-			s.sendall(option_string.translate(None, ' -')[0].upper());
-			print(s.recv(4096));
-		except:
-			print("There was an error.");
-
-		exit();
 
 class CFBalancer(object):
 	def __init__(self, config = None):
@@ -201,6 +185,38 @@ class CFBalancer(object):
 	def api_resume(self):
 		self.config['SEND_HEARTBEATS'] = True;
 		return self.config['SEND_HEARTBEATS'];
+
+class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
+	def __call__(self, parser, args, values, option_string=None):
+		try:
+			from socket import socket, AF_INET, SOCK_STREAM;
+
+			config = dict({
+				'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
+				'CPU_CORES': multiprocessing.cpu_count(),
+				'DAEMON': False,
+				'SERVER_TIMEOUT': 10,
+				'IGNORE': False,
+				'SEND_HEARTBEATS': True,
+				'VERBOSE': False
+			});
+
+			if (args.config):
+				config['CONFIG_FILE'] = args.config;
+			else:
+				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
+
+			config.update(parse_config(args.config));
+
+			s = socket(AF_INET, SOCK_STREAM);
+			s.connect(('localhost', int(config['CONTROL_PORT'])));
+			s.sendall(option_string.translate(None, ' -')[0].upper());
+			print(s.recv(4096));
+		except:
+			print("There was an error.");
+			exit(-1);
+
+		exit();
 
 def main():
 	"""Initialize everything, and start the event loop."""
