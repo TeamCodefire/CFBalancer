@@ -1,14 +1,14 @@
 import argparse;
-import multiprocessing;
 from hashlib import sha256;
+import multiprocessing;
 from os import getloadavg;
 
 from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
 from twisted.internet import reactor, task;
 
-heartbeat_pipe = None;
+_api = dict();				# A dict for the api functions
 
-config = dict({
+_config = dict({
 	'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
 	'CPU_CORES': multiprocessing.cpu_count(),
 	'DAEMON': False,
@@ -18,57 +18,8 @@ config = dict({
 	'VERBOSE': False
 });
 
-server_table = dict();		# A dict for the server loads
-API = dict();				# A dict for the api functions
-
-
-class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
-	def __call__(self, parser, args, values, option_string=None):
-		try:
-			from socket import socket, AF_INET, SOCK_STREAM;
-
-			config = dict({
-				'CONFIG_FILE': '/configs/loadbalancer/lb.conf',
-				'CPU_CORES': multiprocessing.cpu_count(),
-				'DAEMON': False,
-				'SERVER_TIMEOUT': 10,
-				'IGNORE': False,
-				'SEND_HEARTBEATS': True,
-				'VERBOSE': False
-			});
-
-			if (args.config):
-				config['CONFIG_FILE'] = args.config;
-			else:
-				config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
-
-			config.update(parse_config(args.config));
-
-			s = socket(AF_INET, SOCK_STREAM);
-			s.connect(('localhost', int(config['CONTROL_PORT'])));
-			s.sendall(option_string.translate(None, ' -')[0].upper());
-			print(s.recv(4096));
-		except:
-			print("There was an error.");
-			exit(-1);
-
-		exit();
-
-class Heartbeat(DatagramProtocol):
-	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
-	def datagramReceived(self, data, (host, port)):
-		if (data[:64] == sha256(data[64:] + config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-			server_table[host] = [0, data[64:]]										# ...update the server table.
-
-class Control(Protocol):
-	"""Control socket handler."""
-	def dataReceived(self, data):
-		self.transport.write(call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
-		self.transport.loseConnection();
-
-class ControlFactory(Factory):
-	"""Control socket factory, to spawn Control objects for each request."""
-	protocol = Control;
+_heartbeat_rxpipe, _heartbeat_pipe = multiprocessing.Pipe(False);
+_server_table = dict();		# A dict for the server loads
 
 
 def parse_config(filename):
@@ -117,7 +68,7 @@ def send_heartbeats(pipe, config):
 				return;
 
 			for line in lines:
-				if (line[:line.find(':')].strip() == config['NETLOAD_INTERFACE']):
+				if (line[:line.find(':')].strip() == _config['NETLOAD_INTERFACE']):
 					netload = int(line[line.find(':'):].split()[9]) - txbytes;
 					txbytes += netload;
 
@@ -127,12 +78,12 @@ def send_heartbeats(pipe, config):
 			if (data['payload']):
 				heartbeat = data['payload'];
 			else:
-				heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(netload));
+				heartbeat = str(_config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / _config['CPU_CORES']) + ',' + str(netload));
 
 			# And send it to every host in the list.
 			try:
 				for host in data['hosts']:
-					socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(config['HEARTBEAT_PORT'])));
+					socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + _config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(_config['HEARTBEAT_PORT'])));
 			except:
 				pass;
 
@@ -141,73 +92,110 @@ def send_heartbeats(pipe, config):
 def start_balancer():
 	# Add the default hosts.
 	try:
-		if type(config['CODEFIRE_WEB_IPS']) == list:
-			for ip in config['CODEFIRE_WEB_IPS']:
+		if type(_config['CODEFIRE_WEB_IPS']) == list:
+			for ip in _config['CODEFIRE_WEB_IPS']:
 				if (ip):
-					server_table[ip] = None;
-		elif type(config['CODEFIRE_WEB_IPS']) == str:
-			server_table[config['CODEFIRE_WEB_IPS']] = None;
+					_server_table[ip] = None;
+		elif type(_config['CODEFIRE_WEB_IPS']) == str:
+			_server_table[_config['CODEFIRE_WEB_IPS']] = None;
 	except:
 		exit(-1);
 
 	# Start the heartbeat process.
-	global heartbeat_pipe;
-	rxpipe, heartbeat_pipe = multiprocessing.Pipe(False);
-	multiprocessing.Process(target = send_heartbeats, args = [rxpipe, config]).start();
-	del rxpipe;
+	multiprocessing.Process(target = send_heartbeats, args = [_heartbeat_rxpipe, _config]).start();
 
 	# Register the listeners and start the event loop.
-	reactor.listenUDP(int(config['HEARTBEAT_PORT']), Heartbeat());
-	reactor.listenTCP(int(config['CONTROL_PORT']), ControlFactory());
-	task.LoopingCall(update_server_table).start(int(config['HEARTBEAT_INTERVAL']) / 1000.0);
+	reactor.listenUDP(int(_config['HEARTBEAT_PORT']), Heartbeat());
+	reactor.listenTCP(int(_config['CONTROL_PORT']), ControlFactory());
+	task.LoopingCall(update_server_table).start(int(_config['HEARTBEAT_INTERVAL']) / 1000.0);
 	reactor.run()
 
 def update_server_table():
 	"""Update the server_table, and send out heartbeats."""
-	if (config['VERBOSE']):
-		print(server_table);
+	if (_config['VERBOSE']):
+		print(_server_table);
 
-	if (config['SEND_HEARTBEATS']):
+	if (_config['SEND_HEARTBEATS']):
 		# Send hosts list to the heartbeat subprocess
-		heartbeat_pipe.send({'hosts': server_table.keys(), 'payload': ('IGNORE' if config['IGNORE'] else False)});
+		_heartbeat_pipe.send({'hosts': _server_table.keys(), 'payload': ('IGNORE' if _config['IGNORE'] else False)});
 
 	# Cleanup the server_table
-	for ip in server_table.keys():				# For every ip in the server table...
-		if (server_table[ip]):					# If the ip is still in the server_table...
-			# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
-			if (server_table[ip][0] > config['SERVER_TIMEOUT']):
-				del server_table[ip];			# ...delete the host from server_table.
+	for ip in _server_table.keys():				# For every ip in the server table...
+		if (_server_table[ip]):					# If the ip is still in the server_table...
+												# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
+			if (_server_table[ip][0] > _config['SERVER_TIMEOUT']):
+				del _server_table[ip];			# ...delete the host from server_table.
 			else:								# Otherwise...
-				server_table[ip][0] += 1;		# ...increase the count since we last heard from them.
+				_server_table[ip][0] += 1;		# ...increase the count since we last heard from them.
 
 def call_api(api_method, *args):
-	if (api_method in API):
-		return str(API[api_method](*args));
+	if (api_method in _api):
+		return str(_api[api_method](*args));
 
 def api_list():
 	loads = str();
-	for ip in server_table:
-		loads += str(server_table[ip][0]) + "," + server_table[ip][1];
-		if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']):
+	for ip in _server_table:
+		loads += str(_server_table[ip][0]) + "," + _server_table[ip][1];
+		if (_server_table[ip][1][:_server_table[ip][1].index(",")] == _config['NODE_DL_CNAME']):
 			loads += ",*";
 		loads += "\r\n";
 	return loads;
 
 def api_ignore():
-	config['IGNORE'] = True;
-	return config['IGNORE'];
+	_config['IGNORE'] = True;
+	return _config['IGNORE'];
 
 def api_unignore():
-	config['IGNORE'] = False;
-	return config['IGNORE'];
+	_config['IGNORE'] = False;
+	return _config['IGNORE'];
 
 def api_pause():
-	config['SEND_HEARTBEATS'] = False;
-	return config['SEND_HEARTBEATS'];
+	_config['SEND_HEARTBEATS'] = False;
+	return _config['SEND_HEARTBEATS'];
 
 def api_resume():
-	config['SEND_HEARTBEATS'] = True;
-	return config['SEND_HEARTBEATS'];
+	_config['SEND_HEARTBEATS'] = True;
+	return _config['SEND_HEARTBEATS'];
+
+
+class ApiAction(argparse.Action):		# TODO: Load config in here somehow.
+	def __call__(self, parser, args, values, option_string=None):
+		try:
+			from socket import socket, AF_INET, SOCK_STREAM;
+
+			if (args.config):
+				_config['CONFIG_FILE'] = args.config;
+			else:
+				_config['CONFIG_FILE'] = str(parse_config('/etc/codefire')['DATASTORE'] + _config['CONFIG_FILE']);
+
+			_config.update(parse_config(args.config));
+
+			s = socket(AF_INET, SOCK_STREAM);
+			s.connect(('localhost', int(_config['CONTROL_PORT'])));
+			s.sendall(option_string.translate(None, ' -')[0].upper());
+			print(s.recv(4096));
+		except:
+			print("There was an error.");
+			exit(-1);
+
+		exit();
+
+class Heartbeat(DatagramProtocol):
+	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
+	def datagramReceived(self, data, (host, port)):
+		if (data[:64] == sha256(data[64:] + _config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
+			_server_table[host] = [0, data[64:]];										# ...update the server table.
+
+class Control(Protocol):
+	"""Control socket handler."""
+	def dataReceived(self, data):
+		self.transport.write(call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
+		self.transport.loseConnection();
+
+class ControlFactory(Factory):
+	"""Control socket factory, to spawn Control objects for each request."""
+	protocol = Control;
+
 
 def main():
 	"""Initialize everything, and start the event loop."""
@@ -230,17 +218,17 @@ def main():
 	args = argparser.parse_args();
 
 	# Load the args and config file.
-	config['CONFIG_FILE'] = args.config if args.config else	str(parse_config('/etc/codefire')['DATASTORE'] + config['CONFIG_FILE']);
-	config['DAEMON'] = args.daemon;
-	config['VERBOSE'] = args.verbose;
+	_config['CONFIG_FILE'] = args.config if args.config else str(parse_config('/etc/codefire')['DATASTORE'] + _config['CONFIG_FILE']);
+	_config['DAEMON'] = args.daemon;
+	_config['VERBOSE'] = args.verbose;
 
 	try:
-		config.update(parse_config(config['CONFIG_FILE']));
+		_config.update(parse_config(_config['CONFIG_FILE']));
 	except:
 		print("Error parsing config file.");
 		exit(-1);
 
-	API.update({
+	_api.update({
 		'L': api_list,
 		'S': api_list,
 		'I': api_ignore,
