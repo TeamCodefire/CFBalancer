@@ -10,7 +10,7 @@ from twisted.internet import reactor, task;
 CONFIG_FILE = '/configs/loadbalancer/lb.conf';			# Default config file
 
 # Globals
-_api = dict();			# A dict for the api functions
+_plugins = dict();			# A dict for the plugins
 
 _config = dict({
 	'CPU_CORES': multiprocessing.cpu_count(),
@@ -35,7 +35,7 @@ class Heartbeat(DatagramProtocol):
 class Control(Protocol):
 	"""Control socket handler."""
 	def dataReceived(self, data):
-		self.transport.write(call_api(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
+		self.transport.write(run_plugin(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
 		self.transport.loseConnection();
 
 class ControlFactory(Factory):
@@ -98,10 +98,10 @@ def parse_config(filename):
 	return config;
 
 def register_plugin(name, action):
-	_api[name] = action;
+	_plugins[name] = action;
 
 def register_plugins(plugins):
-	_api.update(plugins);
+	_plugins.update(plugins);
 
 def start_balancer():					# CLEANUP
 	# Add the default hosts.
@@ -180,11 +180,11 @@ def send_heartbeats(pipe, config):		# CLEANUP
 
 			sleep(1);
 
-def call_api(api_method, *args):
-	if (api_method in _api):
-		return str(_api[api_method](*args));
+def run_plugin(plugin, *args):
+	if (plugin in _plugins):
+		return str(_plugins[plugin](*args));
 
-def api_list():
+def _plugin_list():
 	loads = str();
 	for ip in _server_table:
 		loads += str(_server_table[ip][0]) + "," + _server_table[ip][1];
@@ -193,19 +193,19 @@ def api_list():
 		loads += "\r\n";
 	return loads;
 
-def api_ignore():
+def _plugin_ignore():
 	_config['IGNORE'] = True;
 	return _config['IGNORE'];
 
-def api_unignore():
+def _plugin_unignore():
 	_config['IGNORE'] = False;
 	return _config['IGNORE'];
 
-def api_pause():
+def _plugin_pause():
 	_config['SEND_HEARTBEATS'] = False;
 	return _config['SEND_HEARTBEATS'];
 
-def api_resume():
+def _plugin_resume():
 	_config['SEND_HEARTBEATS'] = True;
 	return _config['SEND_HEARTBEATS'];
 
@@ -216,12 +216,12 @@ def main():								# CLEANUP
 
 	# Register the default plugins
 	register_plugins({
-		'L': api_list,
-		'S': api_list,
-		'I': api_ignore,
-		'U': api_unignore,
-		'P': api_pause,
-		'R': api_resume
+		'L': _plugin_list,
+		'S': _plugin_list,
+		'I': _plugin_ignore,
+		'U': _plugin_unignore,
+		'P': _plugin_pause,
+		'R': _plugin_resume
 	})
 
 	# Handle arguments
@@ -234,7 +234,7 @@ def main():								# CLEANUP
 	# Parse and handle config arguments
 	config_args, args = argparser.parse_known_args();
 	if not config_args.config:
-		_config.update(parse_config(str(parse_config('/etc/codefire')['DATASTORE']));
+		_config.update(parse_config(str(parse_config('/etc/codefire')['DATASTORE'])));
 	_config['VERBOSE'] = config_args.verbose;
 
 	# Setup the rest of the arguments
