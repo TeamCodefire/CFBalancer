@@ -7,7 +7,7 @@ from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
 from twisted.internet import reactor, task;
 
 # Constants
-CONFIG_FILE = '/configs/loadbalancer/lb.conf';			# Default config file.
+CONFIG_FILE = '/configs/loadbalancer/lb.conf';			# Default config file
 
 # Globals
 _api = dict();			# A dict for the api functions
@@ -96,6 +96,12 @@ def parse_config(filename):
 	f.close();
 
 	return config;
+
+def register_plugin(name, action):
+	_api[name] = action;
+
+def register_plugins(plugins):
+	_api.update(plugins);
 
 def start_balancer():					# CLEANUP
 	# Add the default hosts.
@@ -208,28 +214,30 @@ def api_resume():
 def main():								# CLEANUP
 	"""Initialize everything, and start the event loop."""
 
-	_api.update({
+	# Register the default plugins
+	register_plugins({
 		'L': api_list,
 		'S': api_list,
 		'I': api_ignore,
 		'U': api_unignore,
 		'P': api_pause,
 		'R': api_resume
-	});
+	})
 
-
-	# Handle argument parsing.
+	# Handle arguments
 	argparser = argparse.ArgumentParser(description = 'Team CodeFire load reporting daemon.');
 
+	# Setup the config arguments
 	argparser.add_argument('-c', '--config', help = 'the config file to use', action = ConfigAction, nargs = '+');
 	argparser.add_argument('-v', '--verbose', help = 'enable verbose output', action = 'store_true');
 
-	args, other_args = argparser.parse_known_args();
-
-	if not args.config:
+	# Parse and handle config arguments
+	config_args, args = argparser.parse_known_args();
+	if not config_args.config:
 		_config.update(parse_config(str(parse_config('/etc/codefire')['DATASTORE']));
-	_config['VERBOSE'] = args.verbose;
+	_config['VERBOSE'] = config_args.verbose;
 
+	# Setup the rest of the arguments
 	group = argparser.add_mutually_exclusive_group();
 	group.add_argument('-d', '--daemon', help = 'enable daemon mode', action = 'store_true');
 	group.add_argument('-i', '--ignore', help = 'set our heartbeat payload to "IGNORE"', action = ApiAction, nargs = 0);
@@ -239,12 +247,13 @@ def main():								# CLEANUP
 	group.add_argument('-s', '--show', help = 'same as --list', action = ApiAction, nargs = 0);
 	group.add_argument('-u', '--unignore', help = 'inverse of --ignore', action = ApiAction, nargs = 0);
 
-	args = argparser.parse_args(other_args);
-
+	# Parse and handle the rest of the arguments
+	args = argparser.parse_args(args);
 	_config['DAEMON'] = args.daemon;
 
-
+	# Start the balancer
 	start_balancer();
+
 
 if __name__ == '__main__':
 	main();
