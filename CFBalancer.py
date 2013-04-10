@@ -104,7 +104,9 @@ class _HeartbeatProtocol(DatagramProtocol):
 
 	def datagramReceived(self, data, (host, port)):
 		if (data[:64] == sha256(data[64:] + self.balancer.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-			self.balancer._server_table[host] = [0, data[64:]];										# ...update the server table.
+			server_data = [int(self.balancer.config['SERVER_TIMEOUT']), data[64:]];
+			self.balancer.run_hooks('pre-update-server-table', **{'server_data': server_data});
+			self.balancer._server_table[host] = server_data;									# ...update the server table.
 
 class _ControlProtocol(Protocol):
 	"""Control socket handler."""
@@ -125,12 +127,7 @@ class _ControlFactory(Factory):
 class CFBalancer():
 	def __init__(self, config = None):
 		self.__heartbeat_rxpipe, self.__heartbeat_pipe = multiprocessing.Pipe(False);
-		self.__hooks = dict({				# A dict for the hooks.  Currently predefined, will be dynamic in the future, hopefully.
-			'hook_type1': list(),
-			'hook_type2': list(),
-			'hook_type3': list()
-			# etc, etc
-		});
+		self.__hooks = dict();				# A dict for the hooks.  Currently predefined, will be dynamic in the future, hopefully.
 		self.__plugins = dict();			# A dict for the plugins, these are called by the ConrtolProtofol socket, or command line flags.
 
 		self._server_table = dict();			# A dict for the server loads
@@ -157,12 +154,12 @@ class CFBalancer():
 			self.__heartbeat_pipe.send({'hosts': self._server_table.keys(), 'payload': ('IGNORE' if self.config['IGNORE'] else False)});
 
 		# Cleanup the server_table
-		for ip in self._server_table.keys():										# For every ip in the server table...
-			if (self._server_table[ip]):											# If the ip is still in the server_table...
-				if (self._server_table[ip][0] > self.config['SERVER_TIMEOUT']):		# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
-					del self._server_table[ip];										# ...delete the host from server_table.
-				else:																# Otherwise...
-					self._server_table[ip][0] += 1;									# ...increase the count since we last heard from them.
+		for ip in self._server_table.keys():							# For every ip in the server table...
+			if (self._server_table[ip]):								# If the ip is still in the server_table...
+				if (self._server_table[ip][0] == 1):					# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
+					del self._server_table[ip];							# ...delete the host from server_table.
+				else:													# Otherwise...
+					self._server_table[ip][0] -= 1;						# ...increase the count since we last heard from them.
 
 	def load_config(self, filename):
 		self.config.update(parse_config(filename));
@@ -198,9 +195,12 @@ class CFBalancer():
 		if (plugin in self.__plugins):
 			return str(self.__plugins[plugin](*args, **kwargs));
 
-	def register_hook(self, hook_type, action):
+	def register_hook(self, hook_type, hook):
+		if (hook_type not in self.__hooks):
+			self.__hooks[hook_type] = list();
 		self.__hooks[hook_type].append(hook);
 
-	def __run_hooks(self, hook_type, *args, **kwargs):
-		for hook in self.__hooks[hook_type]:
-			self.__hooks[hook_type][hook](*args, **kwargs);
+	def run_hooks(self, hook_type, *args, **kwargs):
+		if (hook_type in self.__hooks):
+			for hook in self.__hooks[hook_type]:
+				hook(*args, **kwargs);

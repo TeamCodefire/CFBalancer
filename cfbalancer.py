@@ -62,6 +62,8 @@ def plugin_resume(config, **kwargs):
 
 
 ## Hooks
+def hook_log_updates(server_data, **kwargs):
+	print(server_data);
 
 
 
@@ -132,6 +134,8 @@ def main():								# CLEANUP
 		'P': plugin_pause,
 		'R': plugin_resume
 	});
+
+	balancer.register_hook('pre-update-server-table', hook_log_updates);
 
 	# Start the balancer
 	balancer.start();
