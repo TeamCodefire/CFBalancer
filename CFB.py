@@ -18,7 +18,6 @@
 
 ## Imports
 import argparse;
-import json;
 
 import CFBalancer;
 
@@ -53,7 +52,7 @@ class ApiAction(argparse.Action):
 			s.sendall(option_string.translate(None, ' -')[0].upper());
 			output = str();
 			while True:
-				data, _ = s.recv(1024);
+				data, addr = s.recv(1024);
 				if (not data):
 					break;
 				output += data;

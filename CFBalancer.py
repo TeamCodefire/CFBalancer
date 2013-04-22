@@ -18,6 +18,7 @@
 
 ## Imports
 import gevent;
+import json;
 
 from gevent import sleep, socket;
 from gevent.server import StreamServer;
@@ -65,23 +66,23 @@ def parse_config(filename):
 
 
 ## Default plugins
-def plugin_list(config, server_table, **kwargs):
-	return json.dumps(loads);
+def plugin_list(balancer, server_table, **kwargs):
+	return json.dumps(server_table);
 
-def plugin_ignore(config, **kwargs):
-	config['IGNORE'] = True;
+def plugin_ignore(balancer, **kwargs):
+	balancer.config['IGNORE'] = True;
 	return;
 
-def plugin_unignore(config, **kwargs):
-	config['IGNORE'] = False;
+def plugin_unignore(balancer, **kwargs):
+	balancer.config['IGNORE'] = False;
 	return;
 
-def plugin_pause(config, **kwargs):
-	config['SEND_HEARTBEATS'] = False;
+def plugin_pause(balancer, **kwargs):
+	balancer.config['SEND_HEARTBEATS'] = False;
 	return;
 
-def plugin_resume(config, **kwargs):
-	config['SEND_HEARTBEATS'] = True;
+def plugin_resume(balancer, **kwargs):
+	balancer.config['SEND_HEARTBEATS'] = True;
 	return;
 
 
@@ -174,26 +175,26 @@ class CFBalancer():
 		sock.bind((self.config['NODE_PRIVATE_IP'], int(self.config['HEARTBEAT_PORT'])));
 
 		while True:
-			heartbeat, (addr, _) = sock.recvfrom(4096);
+			heartbeat, addr = sock.recvfrom(4096);
 
 			if (heartbeat[:64] == sha256(heartbeat[64:] + self.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
 				## CLEANUP
 				server_data = [int(self.config['SERVER_TIMEOUT']), heartbeat[64:]];
 				self.run_hooks('pre-update-server-table', **{'server_data': server_data});				# Run the hooks...
-				self.__server_table[addr] = server_data;												# ...and update the server table.
+				self.__server_table[addr[0]] = server_data;												# ...and update the server table.
 
 	def __control_handler(self, sock, (addr, _)):
 		command = str();
 
 		while True:
-			data, _ = sock.recv(1024);
+			data = sock.recv(1024);
 			if (not data):
 				break;
 			command += data;
 
 		colon = command.find(':');				# Hate doing it this way, but it saves cycles
 
-		self.run_plugin(command[:colon].strip().upper(), (command[colon:].strip() if colon else None));
+		sock.send(self.run_plugin(command[:colon].strip().upper(), (command[colon:].strip() if colon else None)));
 
 	def start(self):
 		# Add the default hosts.
