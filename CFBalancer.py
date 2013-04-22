@@ -17,12 +17,18 @@
 
 
 ## Imports
-import multiprocessing;
+import gevent;
 
+from gevent import sleep, socket;
+from gevent.server import StreamServer;
 from hashlib import sha256;
+from multiprocessing import cpu_count;
 from os import getloadavg;
-from twisted.internet.protocol import DatagramProtocol, Protocol, Factory;
-from twisted.internet import reactor, task;
+
+
+
+## Global constants
+CPU_CORES = cpu_count();
 
 
 
@@ -56,84 +62,46 @@ def parse_config(filename):
 
 		return config;
 
-def _heartbeat_dispatcher(pipe, config):		# CLEANUP
-		"""Send out heartbeats, to all hosts."""
-		from time import sleep;
-		from socket import socket, AF_INET, SOCK_DGRAM;
-
-		netload = 0;
-		txbytes = 0;
-
-		while (True):
-			try:
-				f = open('/proc/net/dev', 'r');
-				lines = f.readlines();
-				f.close();
-			except:
-				return;
-
-			for line in lines:
-				if (line[:line.find(':')].strip() == config['NETLOAD_INTERFACE']):
-					netload = int(line[line.find(':'):].split()[9]) - txbytes;
-					txbytes += netload;
-
-			data = pipe.recv();
-
-			# Build the heartbeat.
-			if (data['payload']):
-				heartbeat = data['payload'];
-			else:
-				heartbeat = str(config['NODE_DL_CNAME'] + ',' + str(getloadavg()[0] / config['CPU_CORES']) + ',' + str(netload));
-
-			# And send it to every host in the list.
-			try:
-				for host in data['hosts']:
-					socket(AF_INET, SOCK_DGRAM).sendto(sha256(heartbeat + config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(config['HEARTBEAT_PORT'])));
-			except:
-				pass;
-
-			sleep(1);
 
 
+## Default plugins
+def plugin_list(config, server_table, **kwargs):
+	return json.dumps(loads);
 
-## Twisted handlers
-class _HeartbeatProtocol(DatagramProtocol):
-	"""Heartbeat Handler: Monitors for heartbeats, and updates the server_table when one is received."""
-	def __init__(self, balancer):
-		self.balancer = balancer;
+def plugin_ignore(config, **kwargs):
+	config['IGNORE'] = True;
+	return;
 
-	def datagramReceived(self, data, (host, port)):
-		if (data[:64] == sha256(data[64:] + self.balancer.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-			server_data = [int(self.balancer.config['SERVER_TIMEOUT']), data[64:]];
-			self.balancer.run_hooks('pre-update-server-table', **{'server_data': server_data});
-			self.balancer._server_table[host] = server_data;									# ...update the server table.
+def plugin_unignore(config, **kwargs):
+	config['IGNORE'] = False;
+	return;
 
-class _ControlProtocol(Protocol):
-	"""Control socket handler."""
-	def dataReceived(self, data):
-		self.transport.write(self.factory.balancer.run_plugin(data[:(data.find(':') if (data.find(':') > 0) else len(data))].upper()));
-		self.transport.loseConnection();
+def plugin_pause(config, **kwargs):
+	config['SEND_HEARTBEATS'] = False;
+	return;
 
-class _ControlFactory(Factory):
-	"""Control socket factory, to spawn Control objects for each request."""
-	protocol = _ControlProtocol;
-
-	def __init__(self, balancer):
-		self.balancer = balancer;
+def plugin_resume(config, **kwargs):
+	config['SEND_HEARTBEATS'] = True;
+	return;
 
 
 
 ## The big show
 class CFBalancer():
 	def __init__(self, config = None):
-		self.__heartbeat_rxpipe, self.__heartbeat_pipe = multiprocessing.Pipe(False);
 		self.__hooks = dict();				# A dict for the hooks.  Currently predefined, will be dynamic in the future, hopefully.
-		self.__plugins = dict();			# A dict for the plugins, these are called by the ConrtolProtofol socket, or command line flags.
+		self.__netload = 0;
+		self.__plugins = dict({				# A dict for the plugins, these are called by the ConrtolProtofol socket, or command line flags.
+			'L': plugin_list,
+			'S': plugin_list,
+			'I': plugin_ignore,
+			'U': plugin_unignore,
+			'P': plugin_pause,
+			'R': plugin_resume
+		});
+		self.__server_table = dict();		# A dict for the server loads
 
-		self._server_table = dict();			# A dict for the server loads
-
-		self.config = dict({
-			'CPU_CORES': multiprocessing.cpu_count(),
+		self.config = dict({				# A dict for the balancer configuration
 			'DAEMON': False,
 			'SERVER_TIMEOUT': 10,
 			'IGNORE': False,
@@ -144,46 +112,115 @@ class CFBalancer():
 		if (config):
 			self.config.update(config);
 
-	def __update_server_table(self):	# CLEANUP
-		"""Update the server_table, and send out heartbeats."""
+	def __debug(self, msg):
 		if (self.config['VERBOSE']):
-			print(self._server_table);
+			print(msg);
 
-		if (self.config['SEND_HEARTBEATS']):
-			# Send hosts list to the heartbeat subprocess
-			self.__heartbeat_pipe.send({'hosts': self._server_table.keys(), 'payload': ('IGNORE' if self.config['IGNORE'] else False)});
+	def __heartbeat_dispatcher(self):
+		"""Send out heartbeats, to all hosts."""
+		while True:
+			# We update the server table first, to avoid sending heartbeats to hosts that have expired.
+			self.__update_server_table();
 
+			if (self.config['SEND_HEARTBEATS']):
+				# Build the heartbeat.
+				if (self.config['IGNORE']):
+					heartbeat = "IGNORE";
+				else:
+					heartbeat = str(self.config['NODE_DL_HOSTNAME'] + ',' + str(getloadavg()[0] / CPU_CORES) + ',' + str(self.__netload));
+
+				# And send it to every host in the list.
+				try:
+					for host in self.__server_table.keys():
+						self.run_hooks('pre-send-heartbeat', **{'heartbeat': heartbeat, 'host': host})
+						socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(sha256(heartbeat + self.config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(self.config['HEARTBEAT_PORT'])));
+				except:
+					pass;
+
+			sleep(int(self.config['HEARTBEAT_INTERVAL']) / 1000);
+
+	def __update_netload(self):
+		txbytes = 0;
+
+		while True:
+			try:
+				f = open('/proc/net/dev', 'r');
+				lines = f.readlines();
+				f.close();
+			except:
+				return;
+
+			for line in lines:
+				if (line[:line.find(':')].strip() == self.config['NETLOAD_INTERFACE']):
+					self.__netload = int(line[line.find(':'):].split()[9]) - txbytes;
+					txbytes += self.__netload;
+
+			sleep(1);
+
+	def __update_server_table(self):
+		"""Update the server_table, and send out heartbeats."""
+		self.__debug(self.__server_table);
 		# Cleanup the server_table
-		for ip in self._server_table.keys():							# For every ip in the server table...
-			if (self._server_table[ip]):								# If the ip is still in the server_table...
-				if (self._server_table[ip][0] == 1):					# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
-					del self._server_table[ip];							# ...delete the host from server_table.
+		for host in self.__server_table.keys():							# For every ip in the server table...
+			if (self.__server_table[host]):								# If the ip is still in the server_table...
+				## CLEANUP
+				if (self.__server_table[host][0] == 1):					# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
+					del self.__server_table[host];							# ...delete the host from server_table.
 				else:													# Otherwise...
-					self._server_table[ip][0] -= 1;						# ...increase the count since we last heard from them.
+					self.__server_table[host][0] -= 1;						# ...increase the count since we last heard from them.
 
-	def load_config(self, filename):
-		self.config.update(parse_config(filename));
+	def __heartbeat_handler(self):
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
+		sock.bind((self.config['NODE_PRIVATE_IP'], int(self.config['HEARTBEAT_PORT'])));
 
-	def start(self):	# CLEANUP
+		while True:
+			heartbeat, (addr, _) = sock.recvfrom(4096);
+
+			if (heartbeat[:64] == sha256(heartbeat[64:] + self.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
+				## CLEANUP
+				server_data = [int(self.config['SERVER_TIMEOUT']), heartbeat[64:]];
+				self.run_hooks('pre-update-server-table', **{'server_data': server_data});				# Run the hooks...
+				self.__server_table[addr] = server_data;												# ...and update the server table.
+
+	def __control_handler(self, sock, (addr, _)):
+		command = str();
+
+		while True:
+			data, _ = sock.recv(1024);
+			if (not data):
+				break;
+			command += data;
+
+		colon = command.find(':');				# Hate doing it this way, but it saves cycles
+
+		self.run_plugin(command[:colon].strip().upper(), (command[colon:].strip() if colon else None));
+
+	def start(self):
 		# Add the default hosts.
+		## CLEANUP
 		try:
 			if type(self.config['CODEFIRE_WEB_IPS']) == list:
 				for ip in self.config['CODEFIRE_WEB_IPS']:
 					if (ip):
-						self._server_table[ip] = None;
+						self.__server_table[ip] = None;
 			elif type(self.config['CODEFIRE_WEB_IPS']) == str:
-				self._server_table[self.config['CODEFIRE_WEB_IPS']] = None;
+				self.__server_table[self.config['CODEFIRE_WEB_IPS']] = None;
 		except:
 			exit(-1);
 
-		# Start the heartbeat process.
-		multiprocessing.Process(target = _heartbeat_dispatcher, args = [self.__heartbeat_rxpipe, self.config]).start();
+		# Initialize the control server
+		control_listener = StreamServer((self.config['NODE_PRIVATE_IP'], int(self.config['CONTROL_PORT'])), self.__control_handler);
 
-		# Register the listeners and start the event loop.
-		reactor.listenUDP(int(self.config['HEARTBEAT_PORT']), _HeartbeatProtocol(self));
-		reactor.listenTCP(int(self.config['CONTROL_PORT']), _ControlFactory(self));
-		task.LoopingCall(self.__update_server_table).start(int(self.config['HEARTBEAT_INTERVAL']) / 1000.0);
-		reactor.run()
+		# Create and start all the Greenlets
+		gevent.joinall([
+			gevent.spawn(self.__update_netload),
+			gevent.spawn(self.__heartbeat_handler),
+			gevent.spawn(control_listener.start),
+			gevent.spawn(self.__heartbeat_dispatcher),
+		]);
+
+	def load_config(self, filename):
+		self.config.update(parse_config(filename));
 
 	def register_plugin(self, name, action):
 		self.__plugins[name] = action;
@@ -191,9 +228,15 @@ class CFBalancer():
 	def register_plugins(self, plugins):
 		self.__plugins.update(plugins);
 
-	def run_plugin(self, plugin, *args, **kwargs):
+	def run_plugin(self, plugin, args = None):
+		kwargs = dict({
+			'args': args,
+			'balancer': self,
+			'server_table': self.__server_table
+		});
+
 		if (plugin in self.__plugins):
-			return str(self.__plugins[plugin](*args, **kwargs));
+			return str(self.__plugins[plugin](**kwargs));
 
 	def register_hook(self, hook_type, hook):
 		if (hook_type not in self.__hooks):

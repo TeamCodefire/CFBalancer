@@ -18,12 +18,13 @@
 
 ## Imports
 import argparse;
+import json;
 
 import CFBalancer;
 
 
 
-## Constants
+## Global constants
 CONFIG_FILE = '/configs/loadbalancer/lb.conf';			# Default config file
 
 
@@ -33,50 +34,30 @@ config = dict();
 
 
 
-## Plugins
-def plugin_list(config, server_table, **kwargs):
-	loads = str();
-	for ip in server_table:
-		loads += str(server_table[ip][0]) + "," + server_table[ip][1];
-		if (server_table[ip][1][:server_table[ip][1].index(",")] == config['NODE_DL_CNAME']):
-			loads += ",*";
-		loads += "\r\n";
-	return loads;
-
-def plugin_ignore(config, **kwargs):
-	config['IGNORE'] = True;
-	return config['IGNORE'];
-
-def plugin_unignore(config, **kwargs):
-	config['IGNORE'] = False;
-	return config['IGNORE'];
-
-def plugin_pause(config, **kwargs):
-	config['SEND_HEARTBEATS'] = False;
-	return config['SEND_HEARTBEATS'];
-
-def plugin_resume(config, **kwargs):
-	config['SEND_HEARTBEATS'] = True;
-	return config['SEND_HEARTBEATS'];
-
-
-
 ## Hooks
 def hook_log_updates(server_data, **kwargs):
 	print(server_data);
 
+def hook_log_heartbeats(**kwargs):
+	print(kwargs);
 
 
 ## ArgParser actions
 class ApiAction(argparse.Action):
-	 def __call__(self, parser, args, values, option_string=None):
+	 def __call__(self, parser, args, values, option_string = None):
 		try:
 			from socket import socket, AF_INET, SOCK_STREAM;
 
 			s = socket(AF_INET, SOCK_STREAM);
 			s.connect(('localhost', int(config['CONTROL_PORT'])));
 			s.sendall(option_string.translate(None, ' -')[0].upper());
-			print(s.recv(4096));
+			output = str();
+			while True:
+				data, _ = s.recv(1024);
+				if (not data):
+					break;
+				output += data;
+			print(output);
 		except:
 			print("Error running API command: " + option_string.translate(None, ' -'));
 			exit(-1);
@@ -124,18 +105,8 @@ def main():								# CLEANUP
 
 
 	balancer = CFBalancer.CFBalancer(config);
-
-	# Register the default plugins
-	balancer.register_plugins({
-		'L': plugin_list,
-		'S': plugin_list,
-		'I': plugin_ignore,
-		'U': plugin_unignore,
-		'P': plugin_pause,
-		'R': plugin_resume
-	});
-
-	balancer.register_hook('pre-update-server-table', hook_log_updates);
+	#balancer.register_hook('pre-update-server-table', hook_log_updates);
+	#balancer.register_hook('pre-send-heartbeat', hook_log_heartbeats);
 
 	# Start the balancer
 	balancer.start();
