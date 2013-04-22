@@ -138,7 +138,7 @@ class CFBalancer(object):
 				except:
 					pass;
 
-			sleep(int(self.config['HEARTBEAT_INTERVAL']) / 1000);
+			sleep(int(self.config['HEARTBEAT_INTERVAL']) / 1000.0);
 
 	def __update_netload(self):
 		txbytes = 0;
