@@ -88,7 +88,7 @@ def plugin_resume(balancer, **kwargs):
 
 
 ## The big show
-class CFBalancer():
+class CFBalancer(object):
 	def __init__(self, config = None):
 		self.__hooks = dict();				# A dict for the hooks.  Currently predefined, will be dynamic in the future, hopefully.
 		self.__netload = 0;
