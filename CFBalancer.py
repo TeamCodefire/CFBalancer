@@ -42,6 +42,7 @@ def parse_config(filename):
 		for line in f.readlines():
 			try:
 				line = line[0:line.index('#')];
+				line = line[0:line.index(';')];
 			except:
 				pass;
 
@@ -53,7 +54,7 @@ def parse_config(filename):
 			key = line[0].strip();
 			val = line[1].strip();
 
-			if (val.find(',') >= 0):
+			if (val.[0] == '[' and val[-1] == ']'):
 				val = val.split(',');
 				for i in range(len(val)):
 					val[i] = val[i].strip();
@@ -92,6 +93,8 @@ class CFBalancer(object):
 	def __init__(self, config = None):
 		self.__hooks = dict();				# A dict for the hooks.  Currently predefined, will be dynamic in the future, hopefully.
 		self.__netload = 0;
+		self.__server_table = dict();		# A dict for the server loads
+
 		self.__plugins = dict({				# A dict for the plugins, these are called by the ConrtolProtofol socket, or command line flags.
 			'L': plugin_list,
 			'S': plugin_list,
@@ -100,7 +103,6 @@ class CFBalancer(object):
 			'P': plugin_pause,
 			'R': plugin_resume
 		});
-		self.__server_table = dict();		# A dict for the server loads
 
 		self.config = dict({				# A dict for the balancer configuration
 			'DAEMON': False,
