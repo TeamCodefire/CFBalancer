@@ -54,8 +54,8 @@ def parse_config(filename):
 			key = line[0].strip();
 			val = line[1].strip();
 
-			if (val.[0] == '[' and val[-1] == ']'):
-				val = val.split(',');
+			if (val[0] == '[' and val[-1] == ']'):
+				val = val[1:-1].split(',');
 				for i in range(len(val)):
 					val[i] = val[i].strip();
 
@@ -135,7 +135,6 @@ class CFBalancer(object):
 				# And send it to every host in the list.
 				try:
 					for host in self.__server_table.keys():
-						self.run_hooks('pre-send-heartbeat', **{'heartbeat': heartbeat, 'host': host})
 						socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(sha256(heartbeat + self.config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(self.config['HEARTBEAT_PORT'])));
 				except:
 					pass;
@@ -143,6 +142,9 @@ class CFBalancer(object):
 			sleep(int(self.config['HEARTBEAT_INTERVAL']) / 1000.0);
 
 	def __update_netload(self):
+		# FIX:	Maybe put this in a separate thread / process, for more precice timing and therefore numbers.
+		#		Also, this will take all of the file IO every second out of the process, removing a delay when
+		#		handling requests during that time.
 		txbytes = 0;
 
 		while True:
@@ -151,7 +153,7 @@ class CFBalancer(object):
 				lines = f.readlines();
 				f.close();
 			except:
-				return;
+				return False;
 
 			for line in lines:
 				if (line[:line.find(':')].strip() == self.config['NETLOAD_INTERFACE']):
@@ -159,18 +161,6 @@ class CFBalancer(object):
 					txbytes += self.__netload;
 
 			sleep(1);
-
-	def __update_server_table(self):
-		"""Update the server_table, and send out heartbeats."""
-		self.__debug(self.__server_table);
-		# Cleanup the server_table
-		for host in self.__server_table.keys():							# For every ip in the server table...
-			if (self.__server_table[host]):								# If the ip is still in the server_table...
-				## CLEANUP
-				if (self.__server_table[host][0] == 1):					# If it's not one of the original servers, and it's been more than SERVER_TIMEOUT seconds since we got a heartbeat...
-					del self.__server_table[host];							# ...delete the host from server_table.
-				else:													# Otherwise...
-					self.__server_table[host][0] -= 1;						# ...increase the count since we last heard from them.
 
 	def __heartbeat_handler(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM);
@@ -182,7 +172,6 @@ class CFBalancer(object):
 			if (heartbeat[:64] == sha256(heartbeat[64:] + self.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
 				## CLEANUP
 				server_data = [int(self.config['SERVER_TIMEOUT']), heartbeat[64:]];
-				self.run_hooks('pre-update-server-table', **{'server_data': server_data});				# Run the hooks...
 				self.__server_table[addr[0]] = server_data;												# ...and update the server table.
 
 	def __control_handler(self, sock, (addr, _)):
@@ -194,22 +183,14 @@ class CFBalancer(object):
 				break;
 			command += data;
 
-		colon = command.find(':');				# Hate doing it this way, but it saves cycles
-
+		colon = command.find(':');				# I hate doing it this way, but it saves cycles
 		sock.send(self.run_plugin(command[:colon].strip().upper(), (command[colon:].strip() if colon else None)));
 
 	def start(self):
 		# Add the default hosts.
-		## CLEANUP
-		try:
-			if type(self.config['CODEFIRE_WEB_IPS']) == list:
-				for ip in self.config['CODEFIRE_WEB_IPS']:
-					if (ip):
-						self.__server_table[ip] = None;
-			elif type(self.config['CODEFIRE_WEB_IPS']) == str:
-				self.__server_table[self.config['CODEFIRE_WEB_IPS']] = None;
-		except:
-			exit(-1);
+		for ip in self.config['CODEFIRE_WEB_IPS']:
+			if (ip):
+				self.__server_table[ip] = None;
 
 		# Initialize the control server
 		control_listener = StreamServer((self.config['NODE_PRIVATE_IP'], int(self.config['CONTROL_PORT'])), self.__control_handler);
