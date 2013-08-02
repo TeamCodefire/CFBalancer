@@ -72,19 +72,19 @@ def plugin_list(balancer, server_table, **kwargs):
 
 def plugin_ignore(balancer, **kwargs):
 	balancer.config['IGNORE'] = True;
-	return;
+	return ("Set to IGNORE." if balancer.config['IGNORE'] == True else "Error.");
 
 def plugin_unignore(balancer, **kwargs):
 	balancer.config['IGNORE'] = False;
-	return;
+	return ("Set to not IGNORE." if balancer.config['IGNORE'] == False else "Error.");
 
 def plugin_pause(balancer, **kwargs):
 	balancer.config['SEND_HEARTBEATS'] = False;
-	return;
+	return ("Heartbeats paused." if balancer.config['IGNORE'] == False else "Error.");
 
 def plugin_resume(balancer, **kwargs):
 	balancer.config['SEND_HEARTBEATS'] = True;
-	return;
+	return ("Heartbeats resumed." if balancer.config['IGNORE'] == True else "Error.");
 
 
 
@@ -95,7 +95,7 @@ class CFBalancer(object):
 		self.__netload = 0;
 		self.__server_table = dict();		# A dict for the server loads
 
-		self.__plugins = dict({				# A dict for the plugins, these are called by the ConrtolProtofol socket, or command line flags.
+		self.__plugins = dict({				# A dict for the plugins, these are called by the ConrtolProtocol socket, or command line flags.
 			'L': plugin_list,
 			'S': plugin_list,
 			'I': plugin_ignore,
@@ -122,22 +122,31 @@ class CFBalancer(object):
 	def __heartbeat_dispatcher(self):
 		"""Send out heartbeats, to all hosts."""
 		while True:
-			# We update the server table first, to avoid sending heartbeats to hosts that have expired.
-			self.__update_server_table();
+			heartbeat = None;
+
+			self.__debug(self.__server_table);
 
 			if (self.config['SEND_HEARTBEATS']):
 				# Build the heartbeat.
 				if (self.config['IGNORE']):
-					heartbeat = "IGNORE";
+					heartbeat = str(self.config['NODE_DL_HOSTNAME'] + ',IGNORE,IGNORE');
 				else:
 					heartbeat = str(self.config['NODE_DL_HOSTNAME'] + ',' + str(getloadavg()[0] / CPU_CORES) + ',' + str(self.__netload));
 
-				# And send it to every host in the list.
+			# And send it to every host in the list.
+			for host in self.__server_table.keys():
 				try:
-					for host in self.__server_table.keys():
+					if (self.__server_table[host]):
+						if (self.__server_table[host]['yet_to_be_named_metric'] > int(self.config['SERVER_TIMEOUT'])):		# If it's been less than SERVER_TIMEOUT seconds since we got a heartbeat...
+							del self.__server_table[host];												# ...delete the host from server_table.
+							continue;
+						else:																			# Otherwise...
+							self.__server_table[host]['yet_to_be_named_metric'] += 1;					# ...update the count since we last heard from them.
+
+					if (heartbeat):
 						socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(sha256(heartbeat + self.config['SHARED_SECRET']).hexdigest() + heartbeat, (host, int(self.config['HEARTBEAT_PORT'])));
-				except:
-					pass;
+				except Exception as err:
+					self.__debug("Error sending heartbeat: " + str(err));
 
 			sleep(int(self.config['HEARTBEAT_INTERVAL']) / 1000.0);
 
@@ -170,21 +179,22 @@ class CFBalancer(object):
 			heartbeat, addr = sock.recvfrom(4096);
 
 			if (heartbeat[:64] == sha256(heartbeat[64:] + self.config['SHARED_SECRET']).hexdigest()):	# If the security hash matches...
-				## CLEANUP
-				server_data = [int(self.config['SERVER_TIMEOUT']), heartbeat[64:]];
-				self.__server_table[addr[0]] = server_data;												# ...and update the server table.
+				server_data = heartbeat[64:].split(',');						# ...update the server table.
+				self.__server_table[addr[0]] = dict({
+					'hostname': server_data[0],
+					'cpu_load': server_data[1],
+					'net_load': server_data[2],
+					'yet_to_be_named_metric': 0
+				});
 
 	def __control_handler(self, sock, (addr, _)):
-		command = str();
+		payload = sock.recv(1024);
+		colon = payload.find(':');				# I hate doing it this way, but it saves cycles
 
-		while True:
-			data = sock.recv(1024);
-			if (not data):
-				break;
-			command += data;
-
-		colon = command.find(':');				# I hate doing it this way, but it saves cycles
-		sock.send(self.run_plugin(command[:colon].strip().upper(), (command[colon:].strip() if colon else None)));
+		if (colon >= 0):
+			sock.send(self.run_plugin(payload[:colon], payload[colon:].strip()));
+		else:
+			sock.send(self.run_plugin(payload.strip().upper()));
 
 	def start(self):
 		# Add the default hosts.
@@ -218,6 +228,8 @@ class CFBalancer(object):
 			'balancer': self,
 			'server_table': self.__server_table
 		});
+
+		self.__debug("Running plugin: '" + str(plugin) + "' with arguments: '" + str(args) + "'");
 
 		if (plugin in self.__plugins):
 			return str(self.__plugins[plugin](**kwargs));

@@ -50,15 +50,10 @@ class ApiAction(argparse.Action):
 			s = socket(AF_INET, SOCK_STREAM);
 			s.connect(('localhost', int(config['CONTROL_PORT'])));
 			s.sendall(option_string.translate(None, ' -')[0].upper());
-			output = str();
-			while True:
-				data, addr = s.recv(1024);
-				if (not data):
-					break;
-				output += data;
-			print(output);
-		except:
-			print("Error running API command: " + option_string.translate(None, ' -'));
+
+			print(s.recv(1024));
+		except Exception as err:
+			print("Error running API command '" + option_string.translate(None, ' -') + "': " + str(err));
 			exit(-1);
 		exit();
 
